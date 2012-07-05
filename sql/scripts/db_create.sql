@@ -1,6 +1,6 @@
 ﻿
 
-CREATE SCHEMA bus AUTHORIZATION postgres
+CREATE SCHEMA bus;
         
 CREATE TYPE lang_enum AS ENUM
    (
