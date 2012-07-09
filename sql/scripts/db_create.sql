@@ -90,7 +90,7 @@ CREATE TABLE bus.languages
 
 CREATE TABLE bus.string_keys
 (
-  id     bigint NOT NULL,
+  id     bigserial NOT NULL,
   name   character(256),
 
    CONSTRAINT string_keys_pk PRIMARY KEY (id)
@@ -98,7 +98,7 @@ CREATE TABLE bus.string_keys
 
 CREATE TABLE bus.string_values
 (
-  id       bigint    NOT NULL,
+  id       bigserial    NOT NULL,
   key_id   bigint    NOT NULL,
   lang_id  lang_enum NOT NULL,
   value    character(256),
@@ -141,7 +141,8 @@ CREATE TABLE bus.cities
 (
   id bigserial NOT NULL,
   name_key      bigint	NOT NULL,
-
+  lat double precision 	NOT NULL,
+  lon double precision 	NOT NULL,
   
   CONSTRAINT city_pk PRIMARY KEY (id),
 

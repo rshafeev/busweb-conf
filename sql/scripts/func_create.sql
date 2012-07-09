@@ -62,18 +62,7 @@ END;
 $BODY$  LANGUAGE plpgsql VOLATILE  COST 100;	
 
 --====================================================================================================================
-CREATE OR REPLACE FUNCTION bus.insert_user(role_id bigint,login character, password character)
-RETURNS bigint AS
-$BODY$
-DECLARE
- user_id bigint;
-BEGIN
-  INSERT INTO bus.users (role_id,login,password)  VALUES(role_id,login,password) RETURNING id INTO user_id;
-  RETURN user_id;
-END;
-$BODY$  LANGUAGE plpgsql VOLATILE  COST 100;	
 
---=============================
 -- return 0 : ok
 -- return 1 : invalid role
 -- return 2 : invalid login
