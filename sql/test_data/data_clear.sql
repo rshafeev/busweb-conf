@@ -5,7 +5,7 @@ RETURNS void AS
 $BODY$
 DECLARE
 BEGIN
-delete from bus.languages;
+
 
 delete from bus.route_way_days;
 delete from bus.route_schedule;
@@ -24,6 +24,10 @@ delete from bus.transport_types;
 
 delete from bus.user_roles;
 delete from bus.users;
+
+delete from bus.string_values;
+delete from bus.string_keys;
+delete from bus.languages;
 END;
 $BODY$
   LANGUAGE plpgsql VOLATILE

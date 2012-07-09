@@ -7,8 +7,9 @@ $BODY$
 DECLARE
  key_id  bigint;
 BEGIN
- INSERT INTO bus.lang_keys (name) VALUES(null) RETURNING  id INTO key_id;
+ INSERT INTO bus.string_keys (name) VALUES(null) RETURNING  id INTO key_id;
 NEW.name_key = key_id;
+return NEW;
 END;
 $BODY$
 LANGUAGE plpgsql VOLATILE;
@@ -19,11 +20,10 @@ $BODY$
 DECLARE
  key_id  bigint;
 BEGIN
- DELETE from bus.lang_keys where id = OLD.name_key;
+ DELETE from bus.string_keys where id = OLD.name_key;
 END;
 $BODY$
 LANGUAGE plpgsql VOLATILE;
-
 
 
 -- Triggers
