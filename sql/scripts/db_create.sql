@@ -83,7 +83,7 @@ CREATE TABLE bus.users
 CREATE TABLE bus.languages
 (
   id        lang_enum       NOT NULL,
-  name      character(255)  NOT NULL,
+  name      character varying(50)  NOT NULL,
   
   CONSTRAINT languages_pk PRIMARY KEY (id)
 );
@@ -91,7 +91,7 @@ CREATE TABLE bus.languages
 CREATE TABLE bus.string_keys
 (
   id     bigserial NOT NULL,
-  name   character(256),
+  name   character varying(256),
 
    CONSTRAINT string_keys_pk PRIMARY KEY (id)
 );
@@ -101,7 +101,7 @@ CREATE TABLE bus.string_values
   id       bigserial    NOT NULL,
   key_id   bigint    NOT NULL,
   lang_id  lang_enum NOT NULL,
-  value    character(256),
+  value    character varying(2048),
 
   CONSTRAINT string_values_pk PRIMARY KEY (id),
 

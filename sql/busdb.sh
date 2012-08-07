@@ -8,9 +8,9 @@ echo 'Usage:'
 echo '	bash busdb.sh <conf file> <command>'
 echo
 echo 'Commands:'
-echo '	create: 	  create database;'
-echo '	drop: 		  drop database;'
-echo '	structure: 	  update database structure(tables,schemas,functions and triggers) from scripts;'
+echo '	create: 	      create database;'
+echo '	drop: 		      drop database;'
+echo '	update_structure: update database structure(tables,schemas,functions and triggers) from scripts;'
 echo '	update_data:      clear and fill new data from  $DATA_DIR/data_init.sql;'
 echo '	update_triggers:  update trigger functions and triggers from scripts;'
 echo 'End.'
@@ -41,7 +41,7 @@ case "$2" in
     dropdb -h $HOST -p $PORT -U $USER $DATABASE
     exit
 ;;
-"structure")
+"update_structure")
      psql -f $SCRIPT_DIR/triggers_clear.sql -d  $DATABASE
      psql -f $SCRIPT_DIR/func_clear.sql -d  $DATABASE
      psql -f $SCRIPT_DIR/db_drop.sql -d  $DATABASE
