@@ -6,7 +6,7 @@ CREATE TYPE lang_enum AS ENUM
    (
      'c_en',
      'c_ru',
-     'c_uk',
+     'c_ua',
      'c_be',
      'c_kk'
    );
