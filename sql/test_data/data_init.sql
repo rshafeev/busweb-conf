@@ -9,6 +9,7 @@ DECLARE
 BEGIN
 INSERT INTO bus.languages(id,name) VALUES('c_en', 'English');
 INSERT INTO bus.languages(id,name) VALUES('c_ru', 'Русский');
+INSERT INTO bus.languages(id,name) VALUES('c_ua', 'Українська');
 
 SELECT * INTO id FROM bus.insert_user_role('admin');
 SELECT * INTO id FROM bus.insert_user('admin','roma','14R199009');
@@ -17,11 +18,11 @@ SELECT * INTO id FROM bus.insert_user('admin','marianna','14R199009');
 -- insert cities --
 
 
-INSERT INTO bus.cities (lat,lon) VALUES(50,36) RETURNING  name_key INTO city_name_key;
+INSERT INTO bus.cities (lat,lon,scale) VALUES(50,36,10) RETURNING  name_key INTO city_name_key;
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(city_name_key,'c_ru','Харьков');
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(city_name_key,'c_en','Kharkov');
 
-INSERT INTO bus.cities (lat,lon) VALUES(50,30) RETURNING  name_key INTO city_name_key;
+INSERT INTO bus.cities (lat,lon,scale) VALUES(50,30,8) RETURNING  name_key INTO city_name_key;
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(city_name_key,'c_ru','Киев');
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(city_name_key,'c_en','Kiev');
 

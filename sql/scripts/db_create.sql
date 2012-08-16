@@ -47,7 +47,6 @@ CREATE TYPE bus.node_type_enum AS ENUM
      'c_object'
    );
 
-
 CREATE TYPE bus.short_path AS
    (route_way_id bigint,
     station_id bigint,
@@ -96,12 +95,15 @@ CREATE TABLE bus.string_keys
    CONSTRAINT string_keys_pk PRIMARY KEY (id)
 );
 
+
+
 CREATE TABLE bus.string_values
 (
   id       bigserial    NOT NULL,
   key_id   bigint    NOT NULL,
   lang_id  lang_enum NOT NULL,
   value    character varying(2048),
+
 
   CONSTRAINT string_values_pk PRIMARY KEY (id),
 
@@ -143,7 +145,7 @@ CREATE TABLE bus.cities
   name_key      bigint	NOT NULL,
   lat double precision 	NOT NULL,
   lon double precision 	NOT NULL,
-  
+  scale bigint NOT NULL,
   CONSTRAINT city_pk PRIMARY KEY (id),
 
   CONSTRAINT city_name_fk FOREIGN KEY (name_key)
