@@ -9,7 +9,7 @@ DECLARE
 BEGIN
 INSERT INTO bus.languages(id,name) VALUES('c_en', 'English');
 INSERT INTO bus.languages(id,name) VALUES('c_ru', 'Русский');
-INSERT INTO bus.languages(id,name) VALUES('c_ua', 'Українська');
+INSERT INTO bus.languages(id,name) VALUES('c_uk', 'Українська');
 
 SELECT * INTO id FROM bus.insert_user_role('admin');
 SELECT * INTO id FROM bus.insert_user('admin','roma','14R199009');
