@@ -21,14 +21,28 @@ DECLARE
  key_id  bigint;
 BEGIN
  DELETE from bus.string_keys where id = OLD.name_key;
+ RETURN OLD;
 END;
 $BODY$
 LANGUAGE plpgsql VOLATILE;
 
 
--- Triggers
+-- City triggers
 CREATE TRIGGER city_createname_key_trigger
 BEFORE INSERT ON bus.cities
 FOR EACH  ROW EXECUTE PROCEDURE bus.create_name_key();
+
+CREATE TRIGGER city_deletename_key_trigger
+AFTER DELETE ON bus.cities
+FOR EACH  ROW EXECUTE PROCEDURE bus.delete_name_key();
+
+-- Station triggers
+CREATE TRIGGER station_createname_key_trigger
+BEFORE INSERT ON bus.stations
+FOR EACH  ROW EXECUTE PROCEDURE bus.create_name_key();
+
+CREATE TRIGGER station_deletename_key_trigger
+AFTER DELETE ON bus.stations
+FOR EACH  ROW EXECUTE PROCEDURE bus.delete_name_key();
 
  

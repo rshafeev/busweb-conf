@@ -42,6 +42,7 @@ case "$2" in
     exit
 ;;
 "update_structure")
+     psql -f $SCRIPT_DIR/data_clear.sql -d  $DATABASE
      psql -f $SCRIPT_DIR/triggers_clear.sql -d  $DATABASE
      psql -f $SCRIPT_DIR/func_clear.sql -d  $DATABASE
      psql -f $SCRIPT_DIR/db_drop.sql -d  $DATABASE
@@ -52,7 +53,7 @@ case "$2" in
      exit
 ;;
 "update_data")
-     psql -f $DATA_DIR/data_clear.sql -d  $DATABASE
+     psql -f $SCRIPT_DIR/data_clear.sql -d  $DATABASE
      psql -f $DATA_DIR/data_init.sql -d $DATABASE
      exit
 ;;

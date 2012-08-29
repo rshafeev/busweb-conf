@@ -2,7 +2,6 @@
 
 CREATE SCHEMA bus;
         
---======================================= Create types ===========================================================
 CREATE TYPE lang_enum AS ENUM
    (
      'c_en',
@@ -42,6 +41,11 @@ CREATE TYPE bus.route_type_enum AS ENUM
     'c_route_tram'
     ); 
 
+CREATE TYPE bus.node_type_enum AS ENUM
+   (
+     'c_station',
+     'c_object'
+   );
 
 CREATE TYPE bus.short_path AS
    (route_way_id bigint,
@@ -50,53 +54,15 @@ CREATE TYPE bus.short_path AS
     time_in time without time zone,
     station_delay interval,
     money_cost money);
+ALTER TYPE bus.short_path OWNER TO postgres;
 
---============================================ create table - enums ========================================================
-CREATE TABLE bus.languages
-(
-  id        lang_enum       NOT NULL,
-  name      character varying(50)  NOT NULL,
-  
-  CONSTRAINT languages_pk PRIMARY KEY (id)
-);
-
---==============
-
-CREATE TABLE bus.transport_types
-(
-  id 		bus.transport_type_enum	NOT NULL,
-  ev_speed 	double precision 	NOT NULL,
-  CONSTRAINT    "transport_type_pk" PRIMARY KEY (id)
-)
-WITH (
-  OIDS=FALSE
-);
-
---==============
-
-CREATE TABLE bus.route_types
-(
-  id 		bus.route_type_enum	NOT NULL,
-  transport_id 	bus.transport_type_enum	NOT NULL,
-  CONSTRAINT    "route_type_pk" PRIMARY KEY (id),
-  CONSTRAINT route_type_transporttype_fk FOREIGN KEY (transport_id)
-      REFERENCES bus.transport_types (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE CASCADE 
-)
-WITH (
-  OIDS=FALSE
-);
-
---============================================== auth tables =================================================================
-
+------------------------------------ create database --------------------------------------
 CREATE TABLE bus.user_roles
 (
   id       bigserial      NOT NULL,
   name     character(256) NOT NULL,
   CONSTRAINT user_role_id_pk PRIMARY KEY (id)
 );
-
---===============
 
 CREATE TABLE bus.users
 (
@@ -113,7 +79,13 @@ CREATE TABLE bus.users
   
 );
 
---============================================== string values tables =================================================================
+CREATE TABLE bus.languages
+(
+  id        lang_enum       NOT NULL,
+  name      character varying(50)  NOT NULL,
+  
+  CONSTRAINT languages_pk PRIMARY KEY (id)
+);
 
 CREATE TABLE bus.string_keys
 (
@@ -123,7 +95,7 @@ CREATE TABLE bus.string_keys
    CONSTRAINT string_keys_pk PRIMARY KEY (id)
 );
 
---===============
+
 
 CREATE TABLE bus.string_values
 (
@@ -146,7 +118,26 @@ CREATE TABLE bus.string_values
 );
 
 
---============================================== basic tables =================================================================
+
+
+
+--######################################
+
+CREATE TABLE bus.node_types
+(
+  id                bus.node_type_enum     NOT NULL,
+  name_key          bigint	           NOT NULL,
+
+  CONSTRAINT node_type_id_pk PRIMARY KEY (id),
+  CONSTRAINT node_type_name_fk FOREIGN KEY (name_key)
+      REFERENCES bus.string_keys (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE SET NULL
+)
+WITH (
+  OIDS=FALSE
+);
+
+--######################################
 
 CREATE TABLE bus.cities
 (
@@ -159,58 +150,39 @@ CREATE TABLE bus.cities
 
   CONSTRAINT city_name_fk FOREIGN KEY (name_key)
       REFERENCES bus.string_keys (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE  CASCADE
+      ON UPDATE CASCADE ON DELETE SET NULL
       
 )
 WITH (
   OIDS=FALSE
 );
+ALTER TABLE bus.cities OWNER TO postgres;
 
---===============
-
-CREATE TABLE bus.stations
+--######################################
+CREATE TABLE bus.transport_types
 (
-  id 			bigserial 		NOT NULL,
-  city_id 		bigint 			NOT NULL,
-  name_key      bigint                  NOT NULL,
-  CONSTRAINT node_pk PRIMARY KEY (id),
-
-  CONSTRAINT node_city_id_fk FOREIGN KEY (city_id)
-      REFERENCES bus.cities (id) MATCH SIMPLE
-      ON UPDATE NO ACTION ON DELETE NO ACTION,
-
-  CONSTRAINT node_name_fk FOREIGN KEY (name_key)
-      REFERENCES bus.string_keys (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE CASCADE
+  id 		bus.transport_type_enum	NOT NULL,
+  ev_speed 	double precision 	NOT NULL,
+  CONSTRAINT    "transport_type_pk" PRIMARY KEY (id)
 )
 WITH (
   OIDS=FALSE
 );
-SELECT AddGeometryColumn('','bus','stations', 'location', 4326, 'POINT', 2);
 
---===============
-
-CREATE TABLE bus.station_transports
+ALTER TABLE bus.transport_types OWNER TO postgres;
+--######################################
+CREATE TABLE bus.route_types
 (
-  station_id 		bigint 			NOT NULL,
-  transport_type_id 	bus.transport_type_enum NOT NULL,
-  
-  CONSTRAINT station_transport_pk PRIMARY KEY (station_id,transport_type_id),
-
-  CONSTRAINT station_trasnport_nid_fk FOREIGN KEY (station_id)
-      REFERENCES bus.stations (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE CASCADE,
-      
-  CONSTRAINT station_trasnport_ttid_fk FOREIGN KEY (transport_type_id)
+  id 		bus.route_type_enum	NOT NULL,
+  transport_id 	bus.transport_type_enum	NOT NULL,
+  CONSTRAINT    "route_type_pk" PRIMARY KEY (id),
+  CONSTRAINT route_type_transporttype_fk FOREIGN KEY (transport_id)
       REFERENCES bus.transport_types (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE CASCADE    
+      ON UPDATE CASCADE ON DELETE CASCADE 
 )
 WITH (
   OIDS=FALSE
 );
-
-
-/*
 
 ALTER TABLE bus.transport_types OWNER TO postgres;
 
@@ -309,7 +281,49 @@ WITH (
 ALTER TABLE bus.term_discounts OWNER TO postgres;
 
 --######################################
+CREATE TABLE bus.nodes
+(
+  id 			bigserial 		NOT NULL,
+  type_id 		bus.node_type_enum 	NOT NULL,
+  city_id 		bigint 			NOT NULL,
+  name_key              bigint                  NOT NULL,
+  CONSTRAINT node_pk PRIMARY KEY (id),
 
+  CONSTRAINT node_city_id_fk FOREIGN KEY (city_id)
+      REFERENCES bus.cities (id) MATCH SIMPLE
+      ON UPDATE NO ACTION ON DELETE NO ACTION,
+
+  CONSTRAINT node_name_fk FOREIGN KEY (name_key)
+      REFERENCES bus.string_keys (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE SET NULL
+)
+WITH (
+  OIDS=FALSE
+);
+ALTER TABLE bus.nodes OWNER TO postgres;
+SELECT AddGeometryColumn('','bus','nodes', 'location', 4326, 'POINT', 2);
+
+--######################################
+
+CREATE TABLE bus.node_transports
+(
+  node_id 		bigint 			NOT NULL,
+  transport_type_id 	bus.transport_type_enum NOT NULL,
+  
+  CONSTRAINT node_transport_pk PRIMARY KEY (node_id,transport_type_id),
+
+  CONSTRAINT node_trasnport_nid_fk FOREIGN KEY (node_id)
+      REFERENCES bus.nodes (id) MATCH SIMPLE
+      ON UPDATE NO ACTION ON DELETE NO ACTION,
+      
+  CONSTRAINT node_trasnport_ttid_fk FOREIGN KEY (transport_type_id)
+      REFERENCES bus.transport_types (id) MATCH SIMPLE
+      ON UPDATE NO ACTION ON DELETE NO ACTION      
+)
+WITH (
+  OIDS=FALSE
+);
+ALTER TABLE bus.node_transports OWNER TO postgres;
 
 
 --######################################
@@ -497,6 +511,12 @@ WITH (
   OIDS=FALSE
 );
 ALTER TABLE bus.calc_shortest_way_times OWNER TO postgres;
+/*
+CREATE  TYPE bus.short_path AS
+   (route_id bigint,
+    station_id bigint,
+    ind bigint
+   );
 */
 
 COMMIT;

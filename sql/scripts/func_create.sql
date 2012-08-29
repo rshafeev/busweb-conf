@@ -10,12 +10,11 @@ BEGIN
    DROP FUNCTION bus.insert_user(bigint,character, character);
    DROP FUNCTION bus.insert_user(character,character, character);
    DROP FUNCTION bus.authenticate(character,character, character);
+   DROP FUNCTION bus.data_clear();
 END;
 $BODY$
   LANGUAGE plpgsql VOLATILE
   COST 100;			
-
- SELECT  bus.drop_functions();
 
 --====================================================================================================================
 CREATE OR REPLACE FUNCTION bus.insert_user_role(role_name character)
@@ -55,7 +54,7 @@ BEGIN
   IF NOT FOUND THEN
      RAISE EXCEPTION 'user_role % not found', role_name;
    END IF;
-  RAISE NOTICE '%', role_id;
+ 
   SELECT * INTO user_id FROM bus.insert_user(role_id,login,password);
   RETURN 1;
 END;
@@ -91,4 +90,40 @@ BEGIN
   RETURN 0;
 END;
 $BODY$  LANGUAGE plpgsql VOLATILE  COST 100;	
---=============================
+
+--====================================================================================================================
+CREATE OR REPLACE FUNCTION bus.data_clear()
+RETURNS void AS
+$BODY$
+DECLARE
+BEGIN
+
+/*
+delete from bus.route_way_days;
+delete from bus.route_schedule;
+delete from bus.route_way_daygroups;
+
+delete from bus.route_way_nodes;
+delete from bus.route_ways;
+delete from bus.routes;
+*/
+
+
+delete from bus.station_transports;
+delete from bus.stations;
+delete from bus.cities;
+
+delete from bus.transport_types;
+
+delete from bus.user_roles;
+delete from bus.users;
+
+delete from bus.string_values;
+delete from bus.string_keys;
+delete from bus.languages;
+END;
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;	
+  
+ --====================================================================================================================	
