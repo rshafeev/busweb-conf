@@ -36,20 +36,35 @@ CREATE TYPE bus.route_type_enum AS ENUM
    (
     'c_route_metro',
     'c_route_metro_transition',
-    'c_route_metro_exit',
     'c_route_trolley',
     'c_route_bus',
-    'c_route_tram'
+    'c_route_tram',
+    'c_route_foot',
+    'c_route_station_input'
     ); 
 
 
-CREATE TYPE bus.short_path AS
-   (route_way_id bigint,
-    station_id bigint,
-    ind bigint,
-    time_in time without time zone,
-    station_delay interval,
-    money_cost money);
+/*CREATE TYPE bus.ways AS
+(
+    way_id          bigint,
+    direct_route_id bigint,
+    station_id 		bigint,
+    ind 			bigint,
+    time_in 		time without time zone,
+    station_delay 	interval,
+    money_cost 		double precision
+);*/
+
+
+CREATE TYPE bus.way AS
+(
+	direct_route_id bigint,
+    station_id 		bigint,
+    ind 			bigint,
+    time_in 		time without time zone,
+    station_delay 	interval,
+    money_cost 		bigint
+);
 
 --============================================ create table - enums ========================================================
 CREATE TABLE bus.languages
@@ -87,7 +102,9 @@ WITH (
   OIDS=FALSE
 );
 
---============================================== auth tables =================================================================
+
+
+--============================================== route tables =================================================================
 
 CREATE TABLE bus.user_roles
 (
@@ -145,6 +162,47 @@ CREATE TABLE bus.string_values
       
 );
 
+--================
+
+CREATE TABLE bus.discounts
+(
+  id bigserial NOT NULL,
+  name_key          bigint		NOT NULL,
+  
+  CONSTRAINT discounts_pk PRIMARY KEY (id),
+  
+  CONSTRAINT discount_name_fk FOREIGN KEY (name_key)
+      REFERENCES bus.string_keys (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE SET NULL
+)
+WITH (
+  OIDS=FALSE
+);
+
+--================
+
+CREATE TABLE bus.discount_by_route_types
+(
+  discount_id 		    bigint 					NOT NULL,
+  route_type_id 	    bus.route_type_enum 	NOT NULL,
+  discount	            double precision 		NOT NULL,
+  
+  CONSTRAINT discount_by_route_type_id_pk PRIMARY KEY (discount_id, route_type_id),
+
+  CONSTRAINT discount_tr_disid_fk FOREIGN KEY (discount_id)
+      REFERENCES bus.discounts (id) MATCH SIMPLE
+      ON UPDATE NO ACTION ON DELETE NO ACTION,
+
+  CONSTRAINT discount_tr_trid_fk FOREIGN KEY (route_type_id)
+      REFERENCES bus.route_types (id) MATCH SIMPLE
+      ON UPDATE NO ACTION ON DELETE NO ACTION,
+
+  CONSTRAINT discount_route_types_discount_after_check 
+             CHECK (discount >= 0::double precision AND discount <= 1::double precision)
+)
+WITH (
+  OIDS=FALSE
+);
 
 --============================================== basic tables =================================================================
 
@@ -170,8 +228,8 @@ WITH (
 
 CREATE TABLE bus.stations
 (
-  id 			bigserial 		NOT NULL,
-  city_id 		bigint 			NOT NULL,
+  id 			bigserial 				NOT NULL,
+  city_id 		bigint 					NOT NULL,
   name_key      bigint                  NOT NULL,
   CONSTRAINT node_pk PRIMARY KEY (id),
 
@@ -209,10 +267,148 @@ WITH (
   OIDS=FALSE
 );
 
+--================
+
+CREATE TABLE bus.routes
+(
+  id 				bigserial 				NOT NULL,
+  city_id 			bigint 					NOT NULL,
+  cost  			double precision 		NOT NULL,
+  route_type_id 	bus.route_type_enum 	NOT NULL,
+  number 			character varying(128)  NOT NULL,
+  name_key 			bigint,
+  
+  CONSTRAINT routes_pk PRIMARY KEY (id),
+
+  CONSTRAINT route_name_key_fk FOREIGN KEY (name_key)
+      REFERENCES bus.string_keys (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE SET NULL,
+      
+  CONSTRAINT route_city_id_fk FOREIGN KEY (city_id)
+      REFERENCES bus.cities (id) MATCH SIMPLE
+      ON UPDATE NO ACTION ON DELETE NO ACTION
+ 
+)
+WITH (
+  OIDS=FALSE
+);
+
+--================
+
+CREATE TABLE bus.direct_routes
+(
+  id bigserial NOT NULL,
+  route_id bigint NOT NULL,
+  direct BIT(1) NOT NULL,
+
+ CONSTRAINT direct_routes_pk PRIMARY KEY (id),
+ CONSTRAINT direct_routes_unique UNIQUE(route_id, direct),
+ 
+ CONSTRAINT direct_route_routeid_fk FOREIGN KEY (route_id)
+      REFERENCES bus.routes (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE
+  
+);
+
+--================
+
+CREATE TABLE bus.route_stations
+(
+  id   				bigserial 		 NOT NULL,
+  direct_route_id 	bigint    		 NOT NULL,
+  station_A_id      bigint    		 ,
+  station_B_id      bigint    		 NOT NULL,
+  position_index    bigint    		 NOT NULL,
+  distance          double precision NOT NULL,  -- kilometers
+  ev_time           interval    	 NOT NULL,  -- seconds
+  
+  CONSTRAINT route_stations_pk PRIMARY KEY (id),
+
+  CONSTRAINT route_station_directroute_id_fk FOREIGN KEY (direct_route_id)
+      REFERENCES bus.direct_routes (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE,
+        
+  CONSTRAINT route_station_station_A_id_fk FOREIGN KEY (station_A_id)
+      REFERENCES bus.stations (id) MATCH SIMPLE
+      ON UPDATE NO ACTION ON DELETE NO ACTION,
+  
+  CONSTRAINT route_station_station_B_id_fk FOREIGN KEY (station_B_id)
+      REFERENCES bus.stations (id) MATCH SIMPLE
+      ON UPDATE NO ACTION ON DELETE NO ACTION     
+    
+);
+SELECT AddGeometryColumn('','bus','route_stations', 'geom', 4326, 'MULTILINESTRING', 2);
+
+--================
+
+CREATE TABLE bus.schedule 
+(
+   id bigserial 					 NOT NULL,
+   direct_route_id 	bigint    		 NOT NULL,
+
+   CONSTRAINT schedule_pk PRIMARY KEY (id),
+   CONSTRAINT schedule_directroute_id_fk FOREIGN KEY (direct_route_id)
+      REFERENCES bus.direct_routes (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+--================
+
+CREATE TABLE bus.schedule_groups
+(
+  id 			bigserial   NOT NULL,
+  schedule_id   bigint 		NOT NULL,
+  
+  CONSTRAINT schedule_groups_pk PRIMARY KEY (id),
+
+  CONSTRAINT schedule_groups_schedule_id_fk FOREIGN KEY (schedule_id)
+      REFERENCES bus.schedule (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE  
+);
+
+--================
+
+CREATE TABLE bus.schedule_group_days
+(
+  schedule_group_id  bigint   NOT NULL,
+  day_id 		     day_enum NOT NULL,
+
+  CONSTRAINT schedule_group_days_pk PRIMARY KEY (schedule_group_id,day_id),
+
+  CONSTRAINT schedule_group_days_schedule_group_id_fk FOREIGN KEY (schedule_group_id)
+      REFERENCES bus.schedule_groups (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE    
+);
+
+--================
+
+CREATE TABLE bus.timetable 
+(
+   id                 bigserial NOT NULL,
+   schedule_group_id  bigint    NOT NULL,
+   time_A  time NOT NULL,
+   time_B  time NOT NULL,
+   frequency interval NOT NULL,
+   
+  CONSTRAINT timetable_pk PRIMARY KEY (id),
+
+  CONSTRAINT timetable_schedule_group_id_fk FOREIGN KEY (schedule_group_id)
+      REFERENCES bus.schedule_groups (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE            
+);
+
+--================
+/*
+
+select row_number() over (order by t1.id) as id, 
+t1.id as relation_A, t2.id as relation_B,t1.direct_route_id as direct_route_A,t2.direct_route_id as direct_route_B
+   FROM bus.route_stations as t1
+   JOIN ( SELECT * FROM bus.route_stations) t2 ON t1.station_b_id = t2.station_a_id;
+*/
+
 
 /*
 
-ALTER TABLE bus.transport_types OWNER TO postgres;
 
 --######################################
 
@@ -237,9 +433,9 @@ ALTER TABLE bus.discounts OWNER TO postgres;
 
 CREATE TABLE bus.discount_transports
 (
-  discount_id 		bigint 			NOT NULL,
+  discount_id 		    bigint 			NOT NULL,
   transport_type_id 	bus.transport_type_enum NOT NULL,
-  discount_after 	double precision 	NOT NULL,
+  discount_after 	    double precision 	NOT NULL,
   
   CONSTRAINT facility_transports_pk PRIMARY KEY (discount_id, transport_type_id),
 
@@ -499,7 +695,6 @@ WITH (
 ALTER TABLE bus.calc_shortest_way_times OWNER TO postgres;
 */
 
-COMMIT;
 
 
 

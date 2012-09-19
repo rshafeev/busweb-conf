@@ -35,6 +35,15 @@ case "$2" in
 "create")
     echo $PORT
     createdb -h $HOST -p $PORT -U $USER $DATABASE -T $TEMPLATE_DB
+    psql -U postgres -f /usr/share/postlbs/routing_core.sql $DATABASE
+    psql -U postgres -f /usr/share/postlbs/routing_core_wrappers.sql $DATABASE
+	# With TSP
+	psql -U postgres -f /usr/share/postlbs/routing_tsp.sql $DATABASE
+	psql -U postgres -f /usr/share/postlbs/routing_tsp_wrappers.sql $DATABASE
+
+	# With Driving Distance
+	psql -U postgres -f /usr/share/postlbs/routing_dd.sql $DATABASE
+	psql -U postgres -f /usr/share/postlbs/routing_dd_wrappers.sql $DATABASE
     exit
 ;;
 "drop")
