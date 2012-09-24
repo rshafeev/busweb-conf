@@ -16,21 +16,22 @@ BEGIN
 
    DROP FUNCTION bus.find_nearest_stations(geometry,bigint,bus.transport_type_enum[],double precision);
    DROP FUNCTION bus.data_clear();
-   DROP FUNCTION bus.shortest_ways(  	bigint,
+  /* DROP FUNCTION bus.shortest_ways(  	bigint,
  		geometry,
 						 		geometry,
 						 	day_enum,
 						  	time without time zone,
 					         	double precision,
 					         	bus.transport_type_enum[],
-					            bigint);
+					            bigint);*/
    
 END;
 $BODY$
   LANGUAGE plpgsql VOLATILE
   COST 100;			
-  
---====================================================================================================================	
+
+--=================================================================================================
+
 CREATE OR REPLACE FUNCTION bus.init_system_data()
 RETURNS  void AS
 $BODY$
@@ -266,7 +267,8 @@ delete from  bus.timetable;
 delete from  bus.schedule_group_days;
 delete from  bus.schedule_groups;
 delete from  bus.schedule;
-delete from  bus.route_stations;
+delete from  bus.graph_relations;
+delete from  bus.route_relations;
 delete from  bus.direct_routes;
 delete from  bus.routes;
 

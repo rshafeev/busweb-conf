@@ -1,12 +1,466 @@
-﻿
+﻿CREATE OR REPLACE FUNCTION bus.get_distance_between_stations(_station_a_id bigint, _station_b_id bigint)
+RETURNS double precision AS
+$BODY$
+DECLARE
+ _distance double precision;
+ p1 geometry;
+ p2 geometry;
+BEGIN
+ SELECT location INTO p1 FROM bus.stations where id = _station_a_id;
+ IF NOT FOUND THEN
+	return 1000000000000000000;
+ END IF;
+ SELECT location INTO p2 FROM bus.stations where id = _station_b_id;
+ IF NOT FOUND THEN
+	return 1000000000000000000;
+ END IF;
+
+ return st_distance(geography(p1),geography(p2));
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
 --==========================================================================================================================  
 
+CREATE OR REPLACE FUNCTION bus.get_next_relation(_curr_relation_id integer,_station_b_id bigint)
+RETURNS bus.route_relations AS
+$BODY$
+DECLARE
+ _next_relation    bus.route_relations;
+BEGIN
+  SELECT * INTO _next_relation FROM bus.route_relations WHERE station_a_id = _station_b_id;
+  IF NOT FOUND THEN
+	return null;
+  END IF;
+  return _next_relation;
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION bus.add_route_station(_station_A_id 		bigint, 
+--==========================================================================================================================  
+
+CREATE OR REPLACE FUNCTION bus.is_has_transition(_curr_relation_a_id integer, 
+						 _curr_relation_b_id integer,
+						 _max_distance      double precision
+						 )
+RETURNS integer AS
+$BODY$
+DECLARE
+  _curr_relation_a    bus.route_relations%ROWTYPE;
+  _curr_relation_b    bus.route_relations%ROWTYPE;
+  
+  _next_relation_a    bus.route_relations;
+  _next_relation_b    bus.route_relations;
+BEGIN
+    SELECT * INTO _curr_relation_a FROM bus.route_relations WHERE id = _curr_relation_a_id;
+  IF NOT FOUND THEN
+	RAISE EXCEPTION 'function bus.get_next_relation(): Cannot find relation';
+  END IF;
+    SELECT * INTO _curr_relation_b FROM bus.route_relations WHERE id = _curr_relation_b_id;
+  IF NOT FOUND THEN
+	RAISE EXCEPTION 'function bus.get_next_relation(): Cannot find relation';
+  END IF;
+  _next_relation_a:= bus.get_next_relation(_curr_relation_a.id,_curr_relation_a.station_b_id);
+  _next_relation_b:= bus.get_next_relation(_curr_relation_b.id,_curr_relation_b.station_b_id);
+  IF _next_relation_a IS NOT NULL AND _next_relation_b IS NOT NULL THEN
+	IF  ( bus.get_distance_between_stations(_curr_relation_a.station_b_id,_curr_relation_b.station_b_id) < _max_distance AND
+	      bus.get_distance_between_stations(_next_relation_a.station_b_id,_next_relation_b.station_b_id) < _max_distance)
+	    OR
+	    ( bus.get_distance_between_stations(_curr_relation_a.station_b_id,_next_relation_b.station_b_id) < _max_distance AND
+	      bus.get_distance_between_stations(_next_relation_a.station_b_id,_curr_relation_b.station_b_id) < _max_distance)
+	THEN
+	    return -1;
+	END IF;
+  END IF;
+  return 1;
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+
+CREATE OR REPLACE FUNCTION bus.update_transitions_for_transport_test(_route_id     bigint,
+								_route_type   	   bus.route_type_enum,
+								_foot_speed        double precision,
+								_max_distance      double precision
+) RETURNS SETOF bus.graph_relations AS
+$BODY$
+DECLARE
+  _graph_relation      bus.graph_relations%ROWTYPE;
+  r                    bus.relation%ROWTYPE;
+  relations            bus.relation[];
+  i                    int;
+  count                int;
+  _row                 record;
+  _city_id             bigint;
+  _arr_types           bus.route_type_enum[];
+BEGIN
+_arr_types = array[bus.route_type_enum('c_route_metro'),bus.route_type_enum('c_route_metro_transition')];
+
+-- get city_id
+SELECT city_id INTO _city_id from bus.routes where id = _route_id;
+
+-- add transitions between 'c_route_metro' and 'c_route_metro_transition'
+IF _route_type = bus.route_type_enum('c_route_metro_transition') THEN
+  
+
+END IF;
+
+-- get all nearest route_relations to current route 
+FOR r IN
+SELECT 
+        r1.id                       as source,
+        table2.relation_id          as target,
+        st_distance(geography(table2.location),geography(bus.stations.location)) as  distance,
+        _route_type                 as source_route_type,
+	bus.routes.route_type_id    as target_route_type       
+FROM    bus.route_relations  as r1
+        JOIN bus.stations       ON bus.stations.id = r1.station_b_id
+        JOIN bus.direct_routes  ON bus.direct_routes.id = r1.direct_route_id
+        JOIN bus.routes         ON bus.routes.id = bus.direct_routes.route_id
+
+        ,(select bus.route_relations.id      as relation_id, 
+		  bus.stations.location      as location,
+		  bus.direct_routes.route_id as route_id,
+		  bus.direct_routes.id       as direct_route_id,
+		  bus.stations.id            as station_id
+		  from bus.route_relations
+                  JOIN bus.stations  ON bus.stations.id = bus.route_relations.station_b_id 
+                  JOIN bus.direct_routes  ON bus.direct_routes.id = bus.route_relations.direct_route_id
+                  where bus.direct_routes.route_id = _route_id
+           )as table2
+	WHERE   bus.direct_routes.route_id <> table2.route_id AND
+	        st_distance(geography(table2.location),geography(bus.stations.location)) < _max_distance AND
+	        (bus.routes.route_type_id <> ALL(_arr_types) OR _route_type <> ALL(_arr_types))
+	        
+	LOOP
+	  relations := array_append(relations,r);
+	END LOOP;	     
+
+-- insert reverse relations
+  i:=1;
+  count := array_upper(relations,1);
+  WHILE i<= count LOOP
+        r.source = relations[i].target;
+        r.target = relations[i].source;
+        relations := array_append(relations,r);
+	i:= i + 1;
+  END LOOP;
+
+  -- return graph_relations
+     FOR _graph_relation IN 
+      select  
+	      1 as id,
+              _city_id as city_id,
+	      bus.route_type_enum('c_route_foot') as route_type_id,
+              relations.source as relation_a_id,
+              relations.target as relation_b_id,
+              bus.timetable.time_a as time_a,
+              bus.timetable.time_b as time_b,
+              bus.schedule_group_days.day_id      as day_id,
+              (relations.distance/1000.0/_foot_speed*60) * interval '00:01:00'   + bus.timetable.frequency as move_time,
+              bus.routes.cost
+      from unnest(relations) as relations
+              JOIN bus.route_relations as r1 ON  r1.id = relations.source
+              JOIN bus.route_relations as r2 ON  r2.id = relations.target
+              JOIN bus.direct_routes         ON bus.direct_routes.id = r2.direct_route_id
+              JOIN bus.routes                ON bus.routes.id = bus.direct_routes.route_id
+	      
+	      JOIN bus.schedule              ON bus.schedule.direct_route_id = r2.direct_route_id
+              JOIN bus.schedule_groups       ON bus.schedule_groups.schedule_id = bus.schedule.id
+              JOIN bus.schedule_group_days   ON bus.schedule_group_days.schedule_group_id = bus.schedule_groups.id
+              JOIN bus.timetable             ON bus.timetable.schedule_group_id = bus.schedule_groups.id    
+
+              where r1.station_a_id IS NOT NULL  AND 
+                    r2.station_a_id IS NOT NULL  AND
+                    bus.is_has_transition(relations.source,relations.target, _max_distance/2.0) > 0
+  LOOP
+      RETURN NEXT _graph_relation;
+  END LOOP;
+
+  i:=1;
+  count := array_upper(relations,1) ;
+ WHILE i<= count LOOP
+       r := relations[i];
+       --RETURN NEXT r;
+       i:= i + 1;
+  END LOOP;
+
+
+
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+
+
+
+ 
+ 
+--=================================================================================================
+CREATE OR REPLACE FUNCTION bus.update_transitions_for_metro(_route_id     bigint,
+												  _route_type   bus.route_type_enum,  -- c_route_metro or c_route_metro_transition
+												  _max_distance double precision
+) RETURNS void AS
+$BODY$
+DECLARE
+
+  r 		     bus.graph_relations%ROWTYPE;
+  _foot_speed    double precision;
+BEGIN
+    
+  
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--=================================================================================================
+
+CREATE OR REPLACE FUNCTION bus.update_transitions_for_transport(_route_id     bigint,
+																_route_type   bus.route_type_enum,
+																_foot_speed double precision,
+																_max_distance double precision
+) RETURNS void AS
+$BODY$
+DECLARE
+  r 		     bus.graph_relations%ROWTYPE;
+BEGIN
+
+ 
+SELECT 
+        r1.id                       as source,
+        table2.relation_id 		    as target,
+	    r1.direct_route_id 		    as direct_route_a,
+	    table2.direct_route_id 		as direct_route_b,
+	    bus.direct_routes.route_id 	as route_a,
+	    table2.route_id   		as route_b,
+	    st_distance(geography(table2.location),geography(bus.stations.location)) as distance       
+FROM    bus.route_relations  as r1
+        JOIN bus.stations       ON bus.stations.id = r1.station_b_id
+        JOIN bus.direct_routes  ON bus.direct_routes.id = r1.direct_route_id
+        JOIN bus.routes         ON bus.routes.id = bus.direct_routes.route_id
+
+        ,(select bus.route_relations.id      as relation_id, 
+		  bus.stations.location      as location,
+		  bus.direct_routes.route_id as route_id,
+		  bus.direct_routes.id       as direct_route_id,
+		  bus.stations.id            as station_id
+		  from bus.route_relations
+                  JOIN bus.stations  ON bus.stations.id = bus.route_relations.station_b_id 
+                  JOIN bus.direct_routes  ON bus.direct_routes.id = bus.route_relations.direct_route_id
+                  where bus.direct_routes.route_id = _route_id
+           )as table2
+	WHERE   bus.direct_routes.route_id <> table2.route_id AND
+	        bus.routes.route_type_id <> _route_type AND
+	        st_distance(geography(table2.location),geography(bus.stations.location)) < _max_distance;
+ 
+/*
+ -- add relations between  current route and  other route stations
+INSERT INTO bus.graph_relations (city_id,route_type_id,relation_a_id,
+ relation_b_id,time_a,time_b,day_id,move_time,cost) 
+select bus.routes.city_id,
+       bus.route_type_enum('c_route_foot') as route_type_id,
+       relations.relation_a as relation_a_id,
+       relations.relation_b as relation_b_id,
+       bus.timetable.time_a as time_a,
+       bus.timetable.time_b as time_b,
+       bus.schedule_group_days.day_id      as day_id,
+       (relations.distance/1000.0/_foot_speed*60) * interval '00:01:00'   + bus.timetable.frequency as move_time,
+       bus.routes.cost
+from 
+(SELECT table2.station_id           as station_a,
+	    r1.station_a_id             as station_b,
+        r1.id                       as relation_a,
+        table2.relation_id 		    as relation_b,
+	    r1.direct_route_id 		    as direct_route_a,
+	    table2.direct_route_id 		as direct_route_b,
+	    bus.direct_routes.route_id 	as route_a,
+	    table2.route_id   		as route_b,
+	    st_distance(geography(table2.location),geography(bus.stations.location)) as distance       
+FROM    bus.route_relations  as r1
+        JOIN bus.stations       ON bus.stations.id = r1.station_b_id
+        JOIN bus.direct_routes  ON bus.direct_routes.id = r1.direct_route_id
+        JOIN bus.routes         ON bus.routes.id = bus.direct_routes.route_id
+
+        ,(select bus.route_relations.id      as relation_id, 
+		  bus.stations.location      as location,
+		  bus.direct_routes.route_id as route_id,
+		  bus.direct_routes.id       as direct_route_id,
+		  bus.stations.id            as station_id
+		  from bus.route_relations
+                  JOIN bus.stations  ON bus.stations.id = bus.route_relations.station_b_id 
+                  JOIN bus.direct_routes  ON bus.direct_routes.id = bus.route_relations.direct_route_id
+                  where bus.direct_routes.route_id = _route_id and bus.route_relations.station_a_id IS NOT NULL
+           )as table2
+	WHERE   bus.direct_routes.route_id <> table2.route_id AND
+	       -- r1.station_a_id IS NOT NULL AND AND
+	        bus.routes.route_type_id <> _route_type AND
+	        st_distance(geography(table2.location),geography(bus.stations.location)) < _max_distance AND
+	        bus.is_transition(r1.id,table2.relation_id) > 0
+) as relations
+JOIN bus.routes              ON bus.routes.id = relations.route_b
+JOIN bus.schedule            ON bus.schedule.direct_route_id = relations.direct_route_b
+JOIN bus.schedule_groups     ON bus.schedule_groups.schedule_id = bus.schedule.id
+JOIN bus.schedule_group_days ON bus.schedule_group_days.schedule_group_id = bus.schedule_groups.id
+JOIN bus.timetable           ON bus.timetable.schedule_group_id = bus.schedule_groups.id;
+*/
+
+-- add relations between route stations and current route stations
+/*
+INSERT INTO bus.graph_relations (city_id,route_type_id,relation_a_id,
+ relation_b_id,time_a,time_b,day_id,move_time,cost) 
+
+select bus.routes.city_id,
+       bus.route_type_enum('c_route_foot') as route_type_id,
+       relations.relation_b as relation_a_id,
+       relations.relation_a as relation_b_id,
+       bus.timetable.time_a as time_a,
+       bus.timetable.time_b as time_b,
+       bus.schedule_group_days.day_id      as day_id,
+       (relations.distance/1000.0/_foot_speed*60) * interval '00:01:00'   + bus.timetable.frequency as move_time,
+       relations.cost       as cost
+       
+from 
+(SELECT 
+    r1.station_a_id             as station_a,
+    table2.station_id           as station_b,
+	r1.id                       as relation_a,
+    table2.relation_id 		    as relation_b,
+	r1.direct_route_id 		    as direct_route_a,
+	table2.direct_route_id 		as direct_route_b,
+	bus.direct_routes.route_id 	as route_a,
+	table2.route_id   		    as route_b,
+	st_distance(geography(table2.location),geography(bus.stations.location)) as distance,
+	table2.cost                 as cost       
+FROM    bus.route_relations  as r1
+        JOIN bus.stations       ON bus.stations.id = r1.station_b_id
+        JOIN bus.direct_routes  ON bus.direct_routes.id = r1.direct_route_id
+        ,(select bus.route_relations.id      as relation_id, 
+		  bus.stations.location      as location,
+		  bus.direct_routes.route_id as route_id,
+		  bus.direct_routes.id       as direct_route_id,
+		  bus.stations.id            as station_id,
+		  bus.routes.cost            as cost
+		  from bus.route_relations
+                  JOIN bus.stations  ON bus.stations.id = bus.route_relations.station_b_id 
+                  JOIN bus.direct_routes  ON bus.direct_routes.id = bus.route_relations.direct_route_id
+                  JOIN bus.routes ON bus.routes.id = bus.direct_routes.route_id
+                  where bus.direct_routes.route_id =_route_id 
+           )as table2
+	WHERE   bus.direct_routes.route_id <> table2.route_id AND
+	        r1.station_a_id IS NOT NULL AND
+	        st_distance(geography(table2.location),geography(bus.stations.location)) < _max_distance AND
+	        bus.is_transition(r1.id,table2.relation_id) > 0 
+) as relations
+JOIN bus.routes ON bus.routes.id = relations.route_b
+JOIN bus.schedule            ON bus.schedule.direct_route_id = relations.direct_route_b
+JOIN bus.schedule_groups     ON bus.schedule_groups.schedule_id = bus.schedule.id
+JOIN bus.schedule_group_days ON bus.schedule_group_days.schedule_group_id = bus.schedule_groups.id
+JOIN bus.timetable           ON bus.timetable.schedule_group_id = bus.schedule_groups.id; 
+  */
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--=================================================================================================
+CREATE OR REPLACE FUNCTION bus.update_transitions(_route_id     bigint,
+												  _max_distance double precision
+) RETURNS void AS
+$BODY$
+DECLARE
+  r 		bus.graph_relations%ROWTYPE;
+  _foot_speed    double precision;
+  _route_type_id bus.route_type_enum;
+BEGIN
+--RAISE NOTICE 'update_transitions()';
+  _foot_speed := 5; -- default value
+  SELECT route_type_id INTO _route_type_id from bus.routes where id = _route_id;
+  
+  SELECT ev_speed INTO _foot_speed  FROM bus.transport_types  
+         WHERE id = bus.transport_type_enum('c_foot');
+  
+  IF     _route_type_id = bus.route_type_enum('c_route_metro') THEN
+	EXECUTE bus.update_transitions_for_transport(_route_id, _route_type_id, _foot_speed,_max_distance);
+  ELSIF _route_type_id = bus.route_type_enum('c_route_metro_transition') THEN
+    EXECUTE bus.update_transitions_for_metro_transition(_route_id, _foot_speed,_max_distance); 
+  ELSE
+    EXECUTE bus.update_transitions_for_transport(_route_id,_route_type_id, _foot_speed,_max_distance); 
+  END IF;
+  
+  
+  
+
+
+
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--=================================================================================================
+
+CREATE OR REPLACE FUNCTION bus.insert_graph_relations(_direct_route_id	bigint,_route_station_input_id bigint)
+RETURNS void AS
+$BODY$
+DECLARE
+  _pause interval;
+BEGIN
+
+ -- insert route relations
+ _pause := interval '00:00:08';
+ INSERT INTO bus.graph_relations (city_id,route_type_id,relation_a_id,
+ relation_b_id,time_a,time_b,day_id,move_time,cost)
+ SELECT  
+	    bus.routes.city_id          as city_id,
+	    bus.routes.route_type_id    as route_type_id,
+        r1.id                       as relation_a_id,
+        r2.id          			    as relation_b_id,
+        null                  		as time_a,
+        null   	                    as time_b,
+        null                        as day_id,
+        (r2.ev_time + _pause)       as move_time,
+        0                 		    as cost
+        from bus.route_relations  as r1
+	JOIN bus.route_relations  as r2     ON r1.station_B_id = r2.station_A_id
+	JOIN bus.direct_routes              ON r2.direct_route_id = direct_routes.id
+	JOIN bus.routes                     ON direct_routes.route_id = routes.id
+WHERE r1.direct_route_id = _direct_route_id and r2.direct_route_id = _direct_route_id ;
+
+-- insert relations between station and route_station (virtual relation) 
+ INSERT INTO bus.graph_relations (city_id,route_type_id,relation_a_id,
+ relation_b_id,time_a,time_b,day_id,move_time,cost)
+ SELECT  
+	bus.routes.city_id              as city_id,
+	bus.routes.route_type_id        as route_type_id,
+    _route_station_input_id         as relation_a_id,
+    bus.route_relations.id          as relation_b_id,
+    bus.timetable.time_a            as time_a,
+    bus.timetable.time_b   	        as time_b,
+    bus.schedule_group_days.day_id  as day_id,
+    bus.timetable.frequency         as move_time,
+    bus.routes.cost                 as cost
+
+    from bus.route_relations 
+	JOIN bus.direct_routes       ON bus.direct_routes.id = bus.route_relations.direct_route_id
+	JOIN bus.routes              ON bus.routes.id = bus.direct_routes.route_id
+    JOIN bus.schedule            ON bus.route_relations.direct_route_id = bus.schedule.direct_route_id
+	JOIN bus.schedule_groups     ON bus.schedule_groups.schedule_id = bus.schedule.id
+    JOIN bus.schedule_group_days ON bus.schedule_group_days.schedule_group_id = bus.schedule_groups.id
+    JOIN bus.timetable           ON bus.timetable.schedule_group_id = bus.schedule_groups.id
+WHERE bus.route_relations.direct_route_id = _direct_route_id;
+
+
+        
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;  
+--====================================================================================================================	
+
+CREATE OR REPLACE FUNCTION bus.add_route_relation(_station_A_id 		bigint, 
 												 _station_B_id 		bigint,
 												 _direct_route_id	bigint,
 												 _index        		bigint,
-												 _transport_speed 	double precision
+												 _transport_speed 	double precision,
+												 _relation_input_id bigint
 												) 
 RETURNS void AS
 $BODY$
@@ -18,13 +472,17 @@ DECLARE
   _geom                 geometry;
   _time                 interval;
 BEGIN
-	SELECT location INTO _p1 FROM bus.stations WHERE id = _station_A_id;
-	SELECT location INTO _p2 FROM bus.stations WHERE id = _station_B_id;
-    _geom := st_multi(st_makeline(_p1,_p2));
-    _distance := st_length(geography(_geom),false);
-    _time := _distance/1000.0/_transport_speed * interval '1 hour';
-
-INSERT INTO bus.route_stations (direct_route_id,station_A_id,station_B_id,position_index,geom,ev_time,distance) 
+    IF _station_A_id  IS NOT NULL AND _station_B_id IS NOT NULL THEN
+		SELECT location INTO _p1 FROM bus.stations WHERE id = _station_A_id;
+		SELECT location INTO _p2 FROM bus.stations WHERE id = _station_B_id;
+		_geom := st_multi(st_makeline(_p1,_p2));
+		_distance := st_length(geography(_geom),false);
+		_time := _distance/1000.0/_transport_speed * interval '1 hour';
+    ELSE
+        _distance := 0.0;
+        _time     := interval '00:00:00';
+    END IF;
+INSERT INTO bus.route_relations (direct_route_id,station_A_id,station_B_id,position_index,geom,ev_time,distance) 
           VALUES (_direct_route_id,_station_A_id,_station_B_id,_index,_geom,_time,_distance);
 
 END;
@@ -47,14 +505,22 @@ RETURNS void AS
 $BODY$
 DECLARE
   i  					bigint;
-  _route_id 			bigint;
   _direct_route_id      bigint;
   _reverse_route_id     bigint;
   _schedule_id          bigint;
   _schedule_group_id    bigint;
   _route  		        bus.routes%ROWTYPE;
   _transport_type       bus.transport_types%ROWTYPE;
+  _relation_input_id    bigint;  -- id of bus.route_relations row, which of route type is 'c_route_station_input'
+  max_distance          double precision;
 BEGIN
+ max_distance := 500;
+ -- get _relation_input_id
+ SELECT bus.route_relations.id INTO _relation_input_id FROM bus.routes 
+	 JOIN bus.direct_routes   ON bus.direct_routes.route_id = bus.routes.id
+	 JOIN bus.route_relations ON bus.route_relations.direct_route_id = bus.direct_routes.id
+ WHERE route_type_id=bus.route_type_enum('c_route_station_input') and city_id = _city_id;
+
  -- get transport_type
  SELECT bus.transport_types.id,bus.transport_types.ev_speed INTO _transport_type FROM bus.route_types JOIN bus.transport_types 
           ON bus.route_types.transport_id = bus.transport_types.id 
@@ -69,7 +535,7 @@ BEGIN
  -- insert names
  i := 0;
  WHILE i< array_upper(_names,1) LOOP
-   RAISE NOTICE ' % : %', _names[i+1][1],_names[i+1][2];
+   --RAISE NOTICE ' % : %', _names[i+1][1],_names[i+1][2];
    INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_route.name_key,lang_enum(_names[i+1][1]),_names[i+1][2]);
    i:= i + 1;
  END LOOP;
@@ -80,40 +546,54 @@ BEGIN
  
  -- insert direct stations
  i := 0;
- WHILE i< array_upper(_direct_stations,1)-1 LOOP
-   EXECUTE bus.add_route_station(_direct_stations[i+1],_direct_stations[i+2],_direct_route_id,i,_transport_type.ev_speed);
+ WHILE i< array_upper(_direct_stations,1) LOOP
+   EXECUTE bus.add_route_relation(_direct_stations[i],_direct_stations[i+1],_direct_route_id,i,_transport_type.ev_speed,1);
    i:= i + 1;
  END LOOP;
 
  -- insert reverse stations
  i := 0;
- WHILE i< array_upper(_reverse_stations,1)-1 LOOP
-   EXECUTE bus.add_route_station(_reverse_stations[i+1],_reverse_stations[i+2],_reverse_route_id,i,_transport_type.ev_speed);
+ WHILE i< array_upper(_reverse_stations,1) LOOP
+   EXECUTE bus.add_route_relation(_reverse_stations[i],_reverse_stations[i+1],_reverse_route_id,i,_transport_type.ev_speed,1);
    i:= i + 1;
  END LOOP; 
+ 
+ 
  
  -- insert schedule
  INSERT INTO bus.schedule (direct_route_id) VALUES(_direct_route_id) RETURNING id INTO _schedule_id;
  INSERT INTO bus.schedule_groups (schedule_id) VALUES (_schedule_id) RETURNING id INTO _schedule_group_id;
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,null);
+/*
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Sunday'));
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Saturday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Monday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Tuesday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Wednesday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Thursday'));
- INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Friday'));
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Friday'));*/
  INSERT INTO bus.timetable(schedule_group_id,time_A,time_B,frequency) 
 				VALUES (_schedule_group_id,time '06:00:00', time '22:00:00', interval '00:05:00');
 
  INSERT INTO bus.schedule (direct_route_id) VALUES(_reverse_route_id) RETURNING id INTO _schedule_id;
  INSERT INTO bus.schedule_groups (schedule_id) VALUES (_schedule_id) RETURNING id INTO _schedule_group_id;
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,null);
+ /*
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Sunday'));
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Saturday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Monday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Tuesday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Wednesday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Thursday'));
- INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Friday'));
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Friday'));*/
  INSERT INTO bus.timetable(schedule_group_id,time_A,time_B,frequency) 
 				VALUES (_schedule_group_id,time '06:00:00', time '22:00:00', interval '00:05:00');
 
+ EXECUTE bus.insert_graph_relations(_direct_route_id,_relation_input_id);
  
+ -- insert transitions
+ -- EXECUTE bus.update_transitions(_route.id,max_distance);
+
 END;
 $BODY$
   LANGUAGE plpgsql VOLATILE
@@ -160,6 +640,7 @@ DECLARE
 	
 
 BEGIN
+
 
 
 --== Geroiv praci ==
@@ -363,14 +844,15 @@ INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(st_proletar.name_key,
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(st_proletar.name_key,'c_en','Proletarska');
 
 
+
 i := 0;
-WHILE i< 500 LOOP
-  
+
+WHILE i< 2 LOOP  
 
 EXECUTE bus.add_route(v_city_id,
     ARRAY [st_geroiv.id,st_stud.id,st_ac_pavlova.id,st_ac_barabash.id,st_kievsk.id,st_pyshk.id,st_univer.id,st_istor.id],
 	ARRAY [st_istor.id,st_univer.id,st_pyshk.id,st_kievsk.id,st_ac_barabash.id,st_ac_pavlova.id,st_stud.id,st_geroiv.id],
-	bus.route_type_enum('c_route_metro'),
+	bus.route_type_enum('c_route_trolley'),
 	'',
 	ARRAY [ARRAY ['c_en','Saltovska line'], ARRAY ['c_ru','Салтовская линия']],
 	2.00);
@@ -381,8 +863,15 @@ EXECUTE bus.add_route(v_city_id,
 	bus.route_type_enum('c_route_metro'),
 	'',
 	ARRAY [ARRAY ['c_en','Oleksiivska line'], ARRAY ['c_ru','Алексеевская линия']],
-	2.00);
-	
+	3.00);
+EXECUTE bus.add_route(v_city_id,
+    ARRAY [st_botan_sad.id,st_nauchnaia.id,st_gosprom.id,st_arch_biket.id,st_sport.id,st_zavod_malish.id],
+	ARRAY [st_zavod_malish.id,st_sport.id,st_arch_biket.id,st_gosprom.id,st_nauchnaia.id,st_botan_sad.id],
+	bus.route_type_enum('c_route_bus'),
+	'',
+	ARRAY [ARRAY ['c_en','Oleksiivska line2'], ARRAY ['c_ru','Алексеевская линия 2']],
+	3.50);
+		
 EXECUTE bus.add_route(v_city_id,
     ARRAY [st_xol_gora.id,st_vokzal.id,st_cent_market.id,st_sovetsk.id,st_prosp_gagarina.id,st_sport.id,st_zavod_malish.id,
 		   st_mosk_prosp.id,st_marsh_guk.id,st_sovet_armii.id,st_maselskogo.id,st_traktor.id,st_proletar.id],
@@ -441,11 +930,11 @@ $BODY$
   COST 100;			
 
 --- init ---
-BEGIN;  
+--BEGIN;  
  SELECT bus.init();
  DROP FUNCTION bus.init();
  DROP FUNCTION bus.stations_init(bigint);
  DROP FUNCTION bus.add_route(bigint,bigint[], bigint[],bus.route_type_enum, text, text[][],double precision);
 		
- DROP FUNCTION bus.add_route_station( bigint, bigint, 	bigint,	bigint,	double precision);
-COMMIT;
+ DROP FUNCTION bus.add_route_relation( bigint, bigint, 	bigint,	bigint,	double precision,bigint);
+--COMMIT;

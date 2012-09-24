@@ -8,8 +8,10 @@ DROP TRIGGER city_delete_trigger      	 ON bus.cities;
 
 DROP TRIGGER station_createname_key_trigger ON bus.stations;
 DROP TRIGGER station_deletename_key_trigger ON bus.stations;
+/*
 DROP TRIGGER station_insert_trigger   	    ON bus.stations;
 DROP TRIGGER station_delete_trigger         ON bus.stations;
+*/
 
 DROP TRIGGER route_createname_key_trigger ON bus.routes;
 DROP TRIGGER route_deletename_key_trigger ON bus.routes;

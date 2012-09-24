@@ -1,11 +1,12 @@
 ﻿
 --------------------- delete database -------------------------------
-
+/*
+DROP TABLE  bus.graph_relations;
 DROP TABLE  bus.timetable;
 DROP TABLE  bus.schedule_group_days;
 DROP TABLE  bus.schedule_groups;
 DROP TABLE  bus.schedule;
-DROP TABLE  bus.route_stations;
+DROP TABLE  bus.route_relations;
 DROP TABLE  bus.direct_routes;
 DROP TABLE  bus.routes;
 
@@ -32,7 +33,9 @@ DROP TABLE  bus.transport_types;
 DROP TYPE  bus.transport_type_enum;
 DROP TYPE  bus.route_type_enum;
 DROP TYPE  bus.way;
+*/
+DROP SCHEMA bus CASCADE;
 DROP TYPE  day_enum;
 DROP TYPE  lang_enum;
 
-DROP SCHEMA bus;
+

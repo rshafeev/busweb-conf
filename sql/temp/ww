@@ -1,0 +1,8 @@
+﻿
+/*
+"POINT(50.0253650246659 36.3360857963562)"
+"POINT(49.9618548878886 36.3429093360901)"
+*/
+select * from  bus.find_nearest_stations(geometry('POINT(50.001075820572 36.2700176239014)'), 
+	            bus.get_city_id(lang_enum('c_ru'),'Харьков'), 
+		    ARRAY [bus.transport_type_enum('c_bus'),bus.transport_type_enum('c_metro')],300);

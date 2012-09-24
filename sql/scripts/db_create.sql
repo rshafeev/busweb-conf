@@ -29,7 +29,9 @@ CREATE TYPE bus.transport_type_enum AS ENUM
     'c_bus',
     'c_trolley',
     'c_tram',
-    'c_foot'
+    'c_foot',
+    'c_electric_train',
+    'c_taxi'
     );
 
 CREATE TYPE bus.route_type_enum AS ENUM
@@ -40,9 +42,17 @@ CREATE TYPE bus.route_type_enum AS ENUM
     'c_route_bus',
     'c_route_tram',
     'c_route_foot',
-    'c_route_station_input'
+    'c_route_station_input',
+    'c_route_electric_train'
     ); 
-
+CREATE TYPE bus.relation AS 
+(
+   source  integer,
+   target  integer,
+   distance double precision,
+   source_route_type bus.route_type_enum,
+   target_route_type bus.route_type_enum
+);
 
 /*CREATE TYPE bus.ways AS
 (
@@ -312,32 +322,32 @@ CREATE TABLE bus.direct_routes
 
 --================
 
-CREATE TABLE bus.route_stations
+CREATE TABLE bus.route_relations
 (
-  id   				bigserial 		 NOT NULL,
+  id   				serial 		     NOT NULL,
   direct_route_id 	bigint    		 NOT NULL,
   station_A_id      bigint    		 ,
-  station_B_id      bigint    		 NOT NULL,
+  station_B_id      bigint    		 ,
   position_index    bigint    		 NOT NULL,
   distance          double precision NOT NULL,  -- kilometers
   ev_time           interval    	 NOT NULL,  -- seconds
   
-  CONSTRAINT route_stations_pk PRIMARY KEY (id),
+  CONSTRAINT route_relations_pk PRIMARY KEY (id),
 
-  CONSTRAINT route_station_directroute_id_fk FOREIGN KEY (direct_route_id)
+  CONSTRAINT route_relations_directroute_id_fk FOREIGN KEY (direct_route_id)
       REFERENCES bus.direct_routes (id) MATCH SIMPLE
       ON UPDATE CASCADE ON DELETE CASCADE,
         
-  CONSTRAINT route_station_station_A_id_fk FOREIGN KEY (station_A_id)
+  CONSTRAINT route_relations_station_A_id_fk FOREIGN KEY (station_A_id)
       REFERENCES bus.stations (id) MATCH SIMPLE
       ON UPDATE NO ACTION ON DELETE NO ACTION,
   
-  CONSTRAINT route_station_station_B_id_fk FOREIGN KEY (station_B_id)
+  CONSTRAINT route_relations_station_B_id_fk FOREIGN KEY (station_B_id)
       REFERENCES bus.stations (id) MATCH SIMPLE
-      ON UPDATE NO ACTION ON DELETE NO ACTION     
+      ON UPDATE NO ACTION ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED     
     
 );
-SELECT AddGeometryColumn('','bus','route_stations', 'geom', 4326, 'MULTILINESTRING', 2);
+SELECT AddGeometryColumn('','bus','route_relations', 'geom', 4326, 'MULTILINESTRING', 2);
 
 --================
 
@@ -370,10 +380,11 @@ CREATE TABLE bus.schedule_groups
 
 CREATE TABLE bus.schedule_group_days
 (
-  schedule_group_id  bigint   NOT NULL,
-  day_id 		     day_enum NOT NULL,
+  id                 bigserial NOT NULL,
+  schedule_group_id  bigint    NOT NULL,
+  day_id 		     day_enum ,
 
-  CONSTRAINT schedule_group_days_pk PRIMARY KEY (schedule_group_id,day_id),
+  CONSTRAINT schedule_group_days_pk PRIMARY KEY (id),
 
   CONSTRAINT schedule_group_days_schedule_group_id_fk FOREIGN KEY (schedule_group_id)
       REFERENCES bus.schedule_groups (id) MATCH SIMPLE
@@ -398,6 +409,39 @@ CREATE TABLE bus.timetable
 );
 
 --================
+CREATE TABLE bus.graph_relations
+(
+  id 				  bigserial        	    NOT NULL,
+  city_id 		      bigint 				NOT NULL,
+  route_type_id       bus.route_type_enum   NOT NULL,
+  relation_a_id       integer 				NOT NULL,
+  relation_b_id       integer 				NOT NULL,
+  time_A              time 				    ,
+  time_B              time 				    ,
+  day_id              day_enum 				,
+  move_time           interval   			NOT NULL,
+  cost                double precision 		NOT NULL,
+  
+  CONSTRAINT graph_relations_pk PRIMARY KEY (id),
+
+  CONSTRAINT graph_relations_city_id_fk FOREIGN KEY (city_id)
+      REFERENCES bus.cities (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT graph_relations_relation_a_id_fk FOREIGN KEY (relation_a_id)
+      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+   CONSTRAINT graph_relations_relation_b_id_fk FOREIGN KEY (relation_b_id)
+      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+  
+
+);
+
+
+--================
+--================
+
+
 /*
 
 select row_number() over (order by t1.id) as id, 

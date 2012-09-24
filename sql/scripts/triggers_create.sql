@@ -42,6 +42,11 @@ BEGIN
 	INSERT INTO bus.direct_routes (route_id,direct) VALUES (_route_id,B'0') 
 	   RETURNING  id INTO  _direct_route_id;
 	
+	-- add fictive relation
+	INSERT INTO bus.route_relations (direct_route_id,station_A_id,station_B_id,position_index,ev_time,distance) 
+          VALUES (_direct_route_id,null,null,0,interval '00:00:00',0);
+          
+	/*
 	INSERT INTO bus.schedule (direct_route_id) VALUES(_direct_route_id) RETURNING id INTO _schedule_id;
 	INSERT INTO bus.schedule_groups (schedule_id) VALUES (_schedule_id) RETURNING id INTO _schedule_group_id;
  
@@ -55,7 +60,7 @@ BEGIN
       
     INSERT INTO bus.timetable(schedule_group_id,time_A,time_B,frequency) 
 				VALUES (_schedule_group_id,time '00:00:00', time '24:00:00', interval '00:00:00');
-				
+			*/	
 	RETURN NEW;
 END;
 $BODY$
@@ -146,6 +151,7 @@ CREATE TRIGGER station_deletename_key_trigger
 AFTER DELETE ON bus.stations
 FOR EACH  ROW EXECUTE PROCEDURE bus.delete_name_key();
 
+/*
 CREATE TRIGGER station_insert_trigger
 AFTER INSERT ON bus.stations
 FOR EACH  ROW EXECUTE PROCEDURE bus.on_insert_station();
@@ -153,7 +159,7 @@ FOR EACH  ROW EXECUTE PROCEDURE bus.on_insert_station();
 CREATE TRIGGER station_delete_trigger
 BEFORE DELETE ON bus.stations 
 FOR EACH  ROW EXECUTE PROCEDURE bus.on_delete_station();
-
+*/
 -- Route triggers
 
 CREATE TRIGGER route_createname_key_trigger
