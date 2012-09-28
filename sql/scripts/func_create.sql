@@ -1,4 +1,24 @@
-﻿
+﻿--===============================================================================================================
+  
+CREATE OR REPLACE FUNCTION bus.get_relation_input_id(_city_id bigint)
+RETURNS integer AS
+$BODY$
+DECLARE
+  _relation_input_id bigint;
+BEGIN
+ SELECT bus.route_relations.id INTO _relation_input_id FROM bus.routes 
+	 JOIN bus.direct_routes   ON bus.direct_routes.route_id = bus.routes.id
+	 JOIN bus.route_relations ON bus.route_relations.direct_route_id = bus.direct_routes.id
+ WHERE route_type_id=bus.route_type_enum('c_route_station_input') and city_id = _city_id;
+
+ return _relation_input_id;
+END;
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;	
+  
+--=================================================================================================
+
 CREATE OR REPLACE FUNCTION bus.drop_functions()
 RETURNS void AS
 $BODY$
@@ -65,6 +85,7 @@ INSERT INTO bus.discounts (id) VALUES (default) RETURNING * INTO _discount;
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_discount.name_key,'c_ru','Отсутствует');
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_discount.name_key,'c_en','Dissapear');
 INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_metro'),1);
+
 INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_metro_transition'),1);
 
 
@@ -72,8 +93,9 @@ INSERT INTO bus.discounts (id) VALUES (default) RETURNING * INTO _discount;
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_discount.name_key,'c_ru','Студенческий');
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_discount.name_key,'c_en','Student');
 INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_metro'),0.5);
-INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_metro_transition'),0.5);
-
+INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_metro_transition'),0.0);
+INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_bus'),1);
+INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_trolley'),0.5);
 
 --========================================================
    
@@ -118,24 +140,26 @@ $BODY$
   COST 100;		
 
 --====================================================================================================================	
-
+-- function returns sql-array of route_relation_id indexes
 CREATE OR REPLACE FUNCTION bus.find_nearest_stations(
-   _location geometry,
+   _location geography,
    _city_id  bigint,
    _transports bus.transport_type_enum[],
    max_distance double precision
 )
-RETURNS SETOF bus.stations AS
+RETURNS SETOF integer AS
 $BODY$
 DECLARE
-  station bus.stations%ROWTYPE;
-  _loc geography;
+  _relation_id integer;
 BEGIN
-   _loc := geography(_location);
-    FOR station IN SELECT * FROM bus.stations JOIN bus.station_transports ON bus.station_transports.station_id = bus.stations.id
-                   WHERE city_id = _city_id AND st_distance(geography(location),_loc) < max_distance AND transport_type_id =  ANY(_transports)
+    FOR _relation_id IN SELECT bus.route_relations.id FROM bus.route_relations
+                   JOIN bus.stations           ON bus.stations.id = bus.route_relations.station_B_id  
+                   JOIN bus.station_transports ON bus.station_transports.station_id = bus.stations.id
+                   WHERE city_id = _city_id AND 
+                         st_distance(location,_location) < max_distance AND 
+                         transport_type_id =  ANY(_transports)
     LOOP
-         RETURN NEXT station;
+         RETURN NEXT _relation_id;
    END LOOP;
     
 END;

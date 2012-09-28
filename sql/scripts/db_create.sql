@@ -45,6 +45,14 @@ CREATE TYPE bus.route_type_enum AS ENUM
     'c_route_station_input',
     'c_route_electric_train'
     ); 
+
+CREATE TYPE bus.alg_strategy AS ENUM
+(
+   'c_time',
+   'c_cost',
+   'c_opt'
+);    
+
 CREATE TYPE bus.relation AS 
 (
    source  integer,
@@ -54,6 +62,19 @@ CREATE TYPE bus.relation AS
    target_route_type bus.route_type_enum
 );
 
+CREATE TYPE bus.path_elem AS 
+(
+path_id         integer,
+index           integer,
+route_id        bigint,
+route_type      bus.route_type_enum,
+route_number    character varying(128),
+route_name      character varying(2048),
+station_name    character varying(2048),
+move_time       interval,
+wait_time       interval,
+cost            double precision
+);
 /*CREATE TYPE bus.ways AS
 (
     way_id          bigint,
@@ -241,6 +262,7 @@ CREATE TABLE bus.stations
   id 			bigserial 				NOT NULL,
   city_id 		bigint 					NOT NULL,
   name_key      bigint                  NOT NULL,
+  location      GEOGRAPHY(POINT,4326)	NOT NULL,
   CONSTRAINT node_pk PRIMARY KEY (id),
 
   CONSTRAINT node_city_id_fk FOREIGN KEY (city_id)
@@ -254,7 +276,6 @@ CREATE TABLE bus.stations
 WITH (
   OIDS=FALSE
 );
-SELECT AddGeometryColumn('','bus','stations', 'location', 4326, 'POINT', 2);
 
 --===============
 
@@ -324,14 +345,14 @@ CREATE TABLE bus.direct_routes
 
 CREATE TABLE bus.route_relations
 (
-  id   				serial 		     NOT NULL,
-  direct_route_id 	bigint    		 NOT NULL,
-  station_A_id      bigint    		 ,
-  station_B_id      bigint    		 ,
-  position_index    bigint    		 NOT NULL,
-  distance          double precision NOT NULL,  -- kilometers
-  ev_time           interval    	 NOT NULL,  -- seconds
-  
+  id   				serial 		     		NOT NULL,
+  direct_route_id 	bigint    		 		NOT NULL,
+  station_A_id      bigint    		 		,
+  station_B_id      bigint    		 		,
+  position_index    bigint    		 		NOT NULL,
+  distance          double precision	    NOT NULL,  -- kilometers
+  ev_time           interval    	 		NOT NULL,  -- seconds
+  geom              GEOGRAPHY(MULTILINESTRING,4326)	,
   CONSTRAINT route_relations_pk PRIMARY KEY (id),
 
   CONSTRAINT route_relations_directroute_id_fk FOREIGN KEY (direct_route_id)
@@ -347,8 +368,6 @@ CREATE TABLE bus.route_relations
       ON UPDATE NO ACTION ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED     
     
 );
-SELECT AddGeometryColumn('','bus','route_relations', 'geom', 4326, 'MULTILINESTRING', 2);
-
 --================
 
 CREATE TABLE bus.schedule 
@@ -420,7 +439,9 @@ CREATE TABLE bus.graph_relations
   time_B              time 				    ,
   day_id              day_enum 				,
   move_time           interval   			NOT NULL,
-  cost                double precision 		NOT NULL,
+  wait_time           interval   			NOT NULL,
+  cost_money          double precision 		NOT NULL,
+  cost_time           double precision      NOT NULL,
   
   CONSTRAINT graph_relations_pk PRIMARY KEY (id),
 
