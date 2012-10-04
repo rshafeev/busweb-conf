@@ -80,7 +80,7 @@ $BODY$
 LANGUAGE plpgsql VOLATILE;
 
 --=================================================================================================
-CREATE OR REPLACE FUNCTION bus.insert_transitions_for_metro_transition(_route_id     bigint)
+CREATE OR REPLACE FUNCTION bus.insert_transitions_for_metro_transition(_route_id     bigint
 ) RETURNS void AS
 $BODY$
 DECLARE
@@ -121,7 +121,7 @@ _arr_types = array[bus.route_type_enum('c_route_metro'),bus.route_type_enum('c_r
 SELECT city_id INTO _city_id from bus.routes where id = _route_id;
 
 -- add transitions between 'c_route_metro' and 'c_route_metro_transition'
-IF _route_type = bus.route_type_enum('c_route_metro_transition') THEN
+IF _route_type = ANY(_arr_types) THEN
   EXECUTE bus.insert_transitions_for_metro_transition(_route_id);
 
 END IF;
@@ -169,11 +169,12 @@ FROM    bus.route_relations  as r1
   RAISE NOTICE 'update_transitions(): %',count;
 
   -- insert into graph_relations
-  INSERT INTO bus.graph_relations (city_id,route_type_id,relation_a_id,
- relation_b_id,time_a,time_b,day_id,wait_time,move_time,cost_money,cost_time)
+  INSERT INTO bus.graph_relations (city_id,route_type_id,relation_type,relation_a_id,
+ relation_b_id,time_a,time_b,day_id,wait_time,move_time,cost_money,cost_time,distance)
   SELECT  
               _city_id            												as city_id,
 	          bus.routes.route_type_id                                          as route_type_id,
+              bus.route_type_enum('c_route_transition')							as relation_type,
               relations.source 													as relation_a_id,
               relations.target 													as relation_b_id,
               bus.timetable.time_a 												as time_a,
@@ -182,7 +183,8 @@ FROM    bus.route_relations  as r1
               bus.timetable.frequency                    						as wait_time,
 			  (relations.distance/1000.0/_foot_speed*60) * interval '00:01:00'  as move_time,
 			  bus.routes.cost                                                   as cost_money,
-			  EXTRACT(EPOCH FROM (relations.distance/1000.0/_foot_speed*60) * interval '00:01:00' + bus.timetable.frequency) as cost_time
+			  EXTRACT(EPOCH FROM (relations.distance/1000.0/_foot_speed*60) * interval '00:01:00' + bus.timetable.frequency/2.0) as cost_time,
+			  relations.distance                                                as distance
 		
       from unnest(relations) as relations
               JOIN bus.route_relations as r1 ON  r1.id = relations.source
@@ -198,8 +200,9 @@ FROM    bus.route_relations  as r1
               where r1.station_a_id IS NOT NULL  AND 
                     r2.station_a_id IS NOT NULL  AND
                     bus.is_has_transition(relations.source,relations.target, _max_distance/2.0) > 0;
-
-
+  select count(*) into count from bus.graph_relations;
+  RAISE NOTICE 'transitions count: %',count;
+  
 END;
 $BODY$
 LANGUAGE plpgsql VOLATILE;
@@ -215,20 +218,22 @@ BEGIN
 
  -- insert route relations
  _pause := interval '00:00:08';
- INSERT INTO bus.graph_relations (city_id,route_type_id,relation_a_id,
- relation_b_id,time_a,time_b,day_id,wait_time,move_time,cost_money,cost_time)
+ INSERT INTO bus.graph_relations (city_id,route_type_id,relation_type,relation_a_id,
+ relation_b_id,time_a,time_b,day_id,wait_time,move_time,cost_money,cost_time,distance)
  SELECT  
-	    bus.routes.city_id          as city_id,
-	    bus.routes.route_type_id    as route_type_id,
-        r1.id                       as relation_a_id,
-        r2.id          			    as relation_b_id,
-        null                  		as time_a,
-        null   	                    as time_b,
-        null                        as day_id,
-        interval '00:00:00'                         as wait_time,
-        (r2.ev_time + _pause)   					as move_time,
-		0                                           as cost_money,
-		EXTRACT(EPOCH FROM r2.ev_time + _pause)     as cost_time
+	    bus.routes.city_id                           as city_id,
+	    bus.routes.route_type_id    				 as route_type_id,
+	    bus.routes.route_type_id                     as relation_type,
+        r1.id                       				 as relation_a_id,
+        r2.id          			    				 as relation_b_id,
+        null                  						 as time_a,
+        null   	                    				 as time_b,
+        null                        				 as day_id,
+        interval '00:00:00'                          as wait_time,
+        (r2.ev_time + _pause)   					 as move_time,
+		0                                            as cost_money,
+		EXTRACT(EPOCH FROM r2.ev_time + _pause)      as cost_time,
+		r2.distance                 as distance
     
         from bus.route_relations  as r1
 	JOIN bus.route_relations  as r2     ON r1.station_B_id = r2.station_A_id
@@ -237,11 +242,12 @@ BEGIN
 WHERE r1.direct_route_id = _direct_route_id and r2.direct_route_id = _direct_route_id ;
 
 -- insert relations between station and route_station (virtual relation) 
- INSERT INTO bus.graph_relations (city_id,route_type_id,relation_a_id,
- relation_b_id,time_a,time_b,day_id,wait_time,move_time,cost_money,cost_time)
+ INSERT INTO bus.graph_relations (city_id,route_type_id,relation_type,relation_a_id,
+ relation_b_id,time_a,time_b,day_id,wait_time,move_time,cost_money,cost_time,distance)
  SELECT  
 	bus.routes.city_id                          as city_id,
 	bus.routes.route_type_id                    as route_type_id,
+	bus.route_type_enum('c_route_station_input') as relation_type,
     _route_station_input_id                     as relation_a_id,
     bus.route_relations.id                      as relation_b_id,
     bus.timetable.time_a                        as time_a,
@@ -250,7 +256,8 @@ WHERE r1.direct_route_id = _direct_route_id and r2.direct_route_id = _direct_rou
     bus.timetable.frequency                     as wait_time,
     interval '00:00:00'                         as move_time,
     bus.routes.cost                             as cost_money,
-    EXTRACT(EPOCH FROM bus.timetable.frequency) as cost_time
+    EXTRACT(EPOCH FROM bus.timetable.frequency/2.0) as cost_time,
+    0                                           as distance   
     from bus.route_relations 
 	JOIN bus.direct_routes       ON bus.direct_routes.id = bus.route_relations.direct_route_id
 	JOIN bus.routes              ON bus.routes.id = bus.direct_routes.route_id
@@ -654,32 +661,35 @@ INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(st_proletar.name_key,
 
 
 i := 0;
-
-WHILE i< 2 LOOP  
+/*
+EXECUTE bus.add_route(v_city_id,
+    ARRAY [st_univer.id,st_gosprom.id],
+	ARRAY [st_gosprom.id,st_univer.id],
+	bus.route_type_enum('c_route_metro_transition'),
+	'',
+	null,
+	0.00);
+	*/
+WHILE i< 1 LOOP  
  RAISE NOTICE 'Add Routes iteration: %',i;
 
 EXECUTE bus.add_route(v_city_id,
     ARRAY [st_geroiv.id,st_stud.id,st_ac_pavlova.id,st_ac_barabash.id,st_kievsk.id,st_pyshk.id,st_univer.id,st_istor.id],
 	ARRAY [st_istor.id,st_univer.id,st_pyshk.id,st_kievsk.id,st_ac_barabash.id,st_ac_pavlova.id,st_stud.id,st_geroiv.id],
 	bus.route_type_enum('c_route_trolley'),
-	'',
-	ARRAY [ARRAY ['c_en','Saltovska line'], ARRAY ['c_ru','Салтовская линия']],
+	'324e',
+	null,
 	2.00);
-
+/*
+ARRAY [ARRAY ['c_en','Saltovska line'], ARRAY ['c_ru','Салтовская линия']]
+*/
 EXECUTE bus.add_route(v_city_id,
     ARRAY [st_august.id,st_botan_sad.id,st_nauchnaia.id,st_gosprom.id,st_arch_biket.id,st_vosstania.id,st_metrost.id],
 	ARRAY [st_metrost.id,st_vosstania.id,st_arch_biket.id,st_gosprom.id,st_nauchnaia.id,st_botan_sad.id,st_august.id],
 	bus.route_type_enum('c_route_metro'),
 	'',
 	ARRAY [ARRAY ['c_en','Oleksiivska line'], ARRAY ['c_ru','Алексеевская линия']],
-	3.00);
-EXECUTE bus.add_route(v_city_id,
-    ARRAY [st_botan_sad.id,st_nauchnaia.id,st_gosprom.id,st_arch_biket.id,st_sport.id,st_zavod_malish.id],
-	ARRAY [st_zavod_malish.id,st_sport.id,st_arch_biket.id,st_gosprom.id,st_nauchnaia.id,st_botan_sad.id],
-	bus.route_type_enum('c_route_bus'),
-	'34e',
-	null,
-	3.50);
+	2.00);
 		
 EXECUTE bus.add_route(v_city_id,
     ARRAY [st_xol_gora.id,st_vokzal.id,st_cent_market.id,st_sovetsk.id,st_prosp_gagarina.id,st_sport.id,st_zavod_malish.id,
@@ -690,7 +700,15 @@ EXECUTE bus.add_route(v_city_id,
 	'',
 	ARRAY [ARRAY ['c_en','Xolondo-gersko-zavodskaia line'], ARRAY ['c_ru','Холодногорско-заводская линия']],
 	2.00);
-	
+
+EXECUTE bus.add_route(v_city_id,
+    ARRAY [st_botan_sad.id,st_nauchnaia.id,st_gosprom.id,st_arch_biket.id,st_sport.id,st_zavod_malish.id],
+	ARRAY [st_zavod_malish.id,st_sport.id,st_arch_biket.id,st_gosprom.id,st_nauchnaia.id,st_botan_sad.id],
+	bus.route_type_enum('c_route_bus'),
+	'34e',
+	null,
+	3.50);
+		
  i:= i + 1;
  END LOOP;
  

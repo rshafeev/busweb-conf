@@ -1,4 +1,28 @@
-﻿
+﻿CREATE OR REPLACE FUNCTION bus.__clean_paths_table(_relation_input_id integer)
+RETURNS  void AS
+$BODY$
+DECLARE
+ _id_arr                integer[];
+ _id                    integer;
+BEGIN
+  FOR _id IN SELECT t1.path_id FROM
+	           (SELECT paths.path_id as path_id,count(*) as count FROM paths 
+	                   JOIN bus.route_relations ON bus.route_relations.id = paths.relation_id
+	                   WHERE bus.route_relations.id <> _relation_input_id
+	                  GROUP BY paths.path_id,bus.route_relations.direct_route_id
+	           ) as t1
+	           WHERE t1.count = 1
+	LOOP
+           _id_arr:= array_append(_id_arr,_id);
+	END LOOP;
+
+  DELETE FROM paths where path_id = ANY(_id_arr);
+END;
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;	
+--===============================================================================================================
+
 CREATE OR REPLACE FUNCTION bus.get_string_without_null(str text)
 RETURNS  text AS
 $BODY$
@@ -16,14 +40,14 @@ $BODY$
   COST 100;	
 --===============================================================================================================
   
-CREATE OR REPLACE FUNCTION bus.shortest_ways2(	_city_id  	bigint,
+CREATE OR REPLACE FUNCTION bus.shortest_ways(	_city_id  	bigint,
 						_p1 		geography,
 						_p2 		geography,
 						_day_id 	day_enum,
 						_time_start  	time,
 					        _max_distance 	double precision,
-					        _routes 	bus.route_type_enum[],
-					        _discount_id    bigint,
+					        _route_types 	text[],
+					        _discounts      double precision[],
 					        _alg_strategy   bus.alg_strategy,
 					        _lang_id        lang_enum)
 RETURNS SETOF bus.way_elem AS
@@ -49,6 +73,8 @@ DECLARE
  _distance              double precision;
  _paths                 bus.filter_path[];
  _way_elem              bus.way_elem%ROWTYPE;
+ _id_arr                integer[];
+ _id                    integer;
 BEGIN
 
   _foot_speed := 5; -- default value
@@ -74,10 +100,14 @@ BEGIN
    END LOOP;
   
   CREATE TEMPORARY  TABLE use_routes  ON COMMIT DROP AS
-  SELECT bus.route_types.id as id,discount 
-         FROM bus.route_types 
-	 JOIN bus.discount_by_route_types ON bus.route_types.id = bus.discount_by_route_types.route_type_id
-        WHERE bus.discount_by_route_types.discount_id = _discount_id AND bus.route_types.id = ANY(_routes);
+  select route_type as id,discount from 
+	( select row_number() over (ORDER BY (select 0)) as id, unnest::bus.route_type_enum as route_type from 
+		unnest( _route_types)) as route_types
+        JOIN
+        ( select row_number() over (ORDER BY (select 0)) as id, unnest as discount from 
+                unnest( _discounts)) as discounts
+        ON discounts.id =  route_types.id;
+
   
   IF _alg_strategy = bus.alg_strategy('c_time') THEN
 	CREATE TEMPORARY TABLE graph ON COMMIT DROP AS
@@ -123,6 +153,7 @@ BEGIN
      relation_id integer,
      graph_id    bigint
   )ON COMMIT DROP;
+
   
  
   count_i := array_upper(relations_A,1);
@@ -136,9 +167,9 @@ BEGIN
 	   query:='select * from graph where source<>'||_relation_input_id||' OR (source = '
 	          ||_relation_input_id||' and target = '||relations_A[i].id||')';
 
-	   RAISE NOTICE '%',relations_A[i];
-           RAISE NOTICE '%',relations_B[j];
-           RAISE NOTICE '%',query;
+	 --  RAISE NOTICE '%',relations_A[i];
+          -- RAISE NOTICE '%',relations_B[j];
+         --  RAISE NOTICE '%',query;
            k:=0;
            WHILE k < 1 LOOP
            BEGIN
@@ -170,6 +201,9 @@ BEGIN
  RAISE  NOTICE 'count: %',count_i; 
 
  --=======================================================================
+ EXECUTE bus.__clean_paths_table(_relation_input_id);
+
+  --=======================================================================
 
  
  _prev_filter_path := null;
@@ -193,8 +227,8 @@ BEGIN
 	LEFT JOIN use_routes                                 ON use_routes.id = bus.graph_relations.route_type_id 
 	ORDER BY paths.path_id,paths.index
   LOOP
-     _paths:= array_append(_paths,_curr_filter_path);
-    /*
+    -- _paths:= array_append(_paths,_curr_filter_path);
+    
        IF  _curr_filter_path.path_id = _prev_filter_path.path_id 
           AND _curr_filter_path.direct_route_id <> _prev_filter_path.direct_route_id THEN
              _temp_filter_path           := _curr_filter_path;
@@ -236,7 +270,7 @@ BEGIN
                   where relations.id = _prev_filter_path.relation_id;
             _curr_filter_path.move_time := _curr_filter_path.distance/1000.0/_foot_speed * interval '1 hour';
             _paths:= array_append(_paths,_curr_filter_path);	
-       END IF;*/
+       END IF;
        _prev_filter_path := _curr_filter_path;
    END LOOP;
 
@@ -275,18 +309,22 @@ $BODY$
 
 --===============================================================================================================
 
-select  * from  bus.shortest_ways2(bus.get_city_id(lang_enum('c_ru'),'Харьков'),
+select  * from  bus.shortest_ways(bus.get_city_id(lang_enum('c_ru'),'Харьков'),
 				 st_geographyfromtext('POINT(50.026350246659 36.3360857963562)'),
 				 st_geographyfromtext('POINT(50.0046341324976 36.2337112426758)'),
 				 day_enum('c_Monday'),
 				 time  '10:00:00',
 				 300,
-				 ARRAY[bus.route_type_enum('c_route_station_input'),
-				       bus.route_type_enum('c_route_transition'),
-				       bus.route_type_enum('c_route_trolley'),
-				       bus.route_type_enum('c_route_metro'),
-				       bus.route_type_enum('c_route_bus')],
-				 bus.get_discount_id(lang_enum('c_ru'),'Студенческий'),
+				 ARRAY['c_route_station_input',
+				       'c_route_transition',
+				       'c_route_trolley',
+				       'c_route_metro',
+				       'c_route_bus'],
+				 ARRAY[1,
+				       1,
+				       1,
+				       0.5,
+				       1],
 				 bus.alg_strategy('c_cost'),
 				 lang_enum('c_ru')) ORDER BY path_id,index; 
 

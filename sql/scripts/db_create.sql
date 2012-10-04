@@ -37,13 +37,14 @@ CREATE TYPE bus.transport_type_enum AS ENUM
 CREATE TYPE bus.route_type_enum AS ENUM
    (
     'c_route_metro',
-    'c_route_metro_transition',
     'c_route_trolley',
     'c_route_bus',
     'c_route_tram',
-    'c_route_foot',
-    'c_route_station_input',
-    'c_route_electric_train'
+    'c_route_electric_train',
+    
+    'c_route_transition',
+    'c_route_metro_transition',
+    'c_route_station_input'
     ); 
 
 CREATE TYPE bus.alg_strategy AS ENUM
@@ -52,7 +53,11 @@ CREATE TYPE bus.alg_strategy AS ENUM
    'c_cost',
    'c_opt'
 );    
-
+CREATE TYPE bus.nearest_relation AS
+(
+  id          integer,
+  distance    double precision
+);
 CREATE TYPE bus.relation AS 
 (
    source  integer,
@@ -62,45 +67,53 @@ CREATE TYPE bus.relation AS
    target_route_type bus.route_type_enum
 );
 
-CREATE TYPE bus.path_elem AS 
+
+CREATE TYPE bus.filter_path AS
 (
-path_id         integer,
-index           integer,
-route_id        bigint,
-route_type      bus.route_type_enum,
-route_number    character varying(128),
-route_name      character varying(2048),
-station_name    character varying(2048),
-move_time       interval,
-wait_time       interval,
-cost            double precision
+   path_id                integer,
+   index                  integer,
+   direct_route_id        bigint,
+   route_type             bus.route_type_enum,
+   relation_index         integer,
+   relation_id            integer,
+   station_id             bigint,
+   move_time              interval,
+   wait_time              interval,
+   cost                   double precision,
+   distance               double precision
+);	
+
+CREATE TYPE bus.way_elem AS
+(
+   path_id                integer,
+   index                  integer,
+   direct_route_id        bigint,
+   route_type             bus.route_type_enum,
+   relation_index         integer,
+   route_name             text,
+   station_name           text,
+   move_time              interval,
+   wait_time              interval,
+   cost                   double precision,
+   distance               double precision
+);	
+
+CREATE TYPE bus.path_elem AS
+(
+ path_id     integer,
+     index       integer,
+     relation_id integer,
+     graph_id    bigint
 );
-/*CREATE TYPE bus.ways AS
-(
-    way_id          bigint,
-    direct_route_id bigint,
-    station_id 		bigint,
-    ind 			bigint,
-    time_in 		time without time zone,
-    station_delay 	interval,
-    money_cost 		double precision
-);*/
 
 
-CREATE TYPE bus.way AS
-(
-	direct_route_id bigint,
-    station_id 		bigint,
-    ind 			bigint,
-    time_in 		time without time zone,
-    station_delay 	interval,
-    money_cost 		bigint
-);
+
+
 
 --============================================ create table - enums ========================================================
 CREATE TABLE bus.languages
 (
-  id        lang_enum       NOT NULL,
+  id        lang_enum              NOT NULL,
   name      character varying(50)  NOT NULL,
   
   CONSTRAINT languages_pk PRIMARY KEY (id)
@@ -111,7 +124,8 @@ CREATE TABLE bus.languages
 CREATE TABLE bus.transport_types
 (
   id 		bus.transport_type_enum	NOT NULL,
-  ev_speed 	double precision 	NOT NULL,
+  ev_speed 	double precision 	    NOT NULL,
+  
   CONSTRAINT    "transport_type_pk" PRIMARY KEY (id)
 )
 WITH (
@@ -122,8 +136,9 @@ WITH (
 
 CREATE TABLE bus.route_types
 (
-  id 		bus.route_type_enum	NOT NULL,
+  id 		    bus.route_type_enum	    NOT NULL,
   transport_id 	bus.transport_type_enum	NOT NULL,
+  
   CONSTRAINT    "route_type_pk" PRIMARY KEY (id),
   CONSTRAINT route_type_transporttype_fk FOREIGN KEY (transport_id)
       REFERENCES bus.transport_types (id) MATCH SIMPLE
@@ -139,8 +154,8 @@ WITH (
 
 CREATE TABLE bus.user_roles
 (
-  id       bigserial      NOT NULL,
-  name     character(256) NOT NULL,
+  id       bigserial              NOT NULL,
+  name     character varying(256) NOT NULL,
   CONSTRAINT user_role_id_pk PRIMARY KEY (id)
 );
 
@@ -148,10 +163,10 @@ CREATE TABLE bus.user_roles
 
 CREATE TABLE bus.users
 (
-  id        bigserial      NOT NULL,
-  role_id   bigint         NOT NULL,
-  login     character(256) NOT NULL,
-  password  character(256) NOT NULL,
+  id        bigserial              NOT NULL,
+  role_id   bigint                 NOT NULL,
+  login     character varying(256) NOT NULL,
+  password  character varying(256) NOT NULL,
   
   CONSTRAINT user_id_pk PRIMARY KEY (id),
 
@@ -165,8 +180,8 @@ CREATE TABLE bus.users
 
 CREATE TABLE bus.string_keys
 (
-  id     bigserial NOT NULL,
-  name   character varying(256),
+  id     bigserial 					NOT NULL,
+  name   character varying(256) 	,
 
    CONSTRAINT string_keys_pk PRIMARY KEY (id)
 );
@@ -176,9 +191,9 @@ CREATE TABLE bus.string_keys
 CREATE TABLE bus.string_values
 (
   id       bigserial    NOT NULL,
-  key_id   bigint    NOT NULL,
-  lang_id  lang_enum NOT NULL,
-  value    character varying(2048),
+  key_id   bigint       NOT NULL,
+  lang_id  lang_enum    NOT NULL,
+  value    text         NOT NULL,
 
 
   CONSTRAINT string_values_pk PRIMARY KEY (id),
@@ -197,7 +212,7 @@ CREATE TABLE bus.string_values
 
 CREATE TABLE bus.discounts
 (
-  id bigserial NOT NULL,
+  id 				bigserial 	NOT NULL,
   name_key          bigint		NOT NULL,
   
   CONSTRAINT discounts_pk PRIMARY KEY (id),
@@ -239,11 +254,11 @@ WITH (
 
 CREATE TABLE bus.cities
 (
-  id bigserial NOT NULL,
-  name_key      bigint	NOT NULL,
-  lat double precision 	NOT NULL,
-  lon double precision 	NOT NULL,
-  scale bigint NOT NULL,
+  id 			bigserial 			NOT NULL,
+  name_key      bigint				NOT NULL,
+  lat 			double precision 	NOT NULL,
+  lon 			double precision 	NOT NULL,
+  scale 		bigint 				NOT NULL,
   CONSTRAINT city_pk PRIMARY KEY (id),
 
   CONSTRAINT city_name_fk FOREIGN KEY (name_key)
@@ -263,6 +278,7 @@ CREATE TABLE bus.stations
   city_id 		bigint 					NOT NULL,
   name_key      bigint                  NOT NULL,
   location      GEOGRAPHY(POINT,4326)	NOT NULL,
+  
   CONSTRAINT node_pk PRIMARY KEY (id),
 
   CONSTRAINT node_city_id_fk FOREIGN KEY (city_id)
@@ -281,8 +297,8 @@ WITH (
 
 CREATE TABLE bus.station_transports
 (
-  station_id 		bigint 			NOT NULL,
-  transport_type_id 	bus.transport_type_enum NOT NULL,
+  station_id 		    bigint 			            NOT NULL,
+  transport_type_id 	bus.transport_type_enum     NOT NULL,
   
   CONSTRAINT station_transport_pk PRIMARY KEY (station_id,transport_type_id),
 
@@ -328,9 +344,9 @@ WITH (
 
 CREATE TABLE bus.direct_routes
 (
-  id bigserial NOT NULL,
-  route_id bigint NOT NULL,
-  direct BIT(1) NOT NULL,
+  id           bigserial NOT NULL,
+  route_id     bigint    NOT NULL,
+  direct       BIT(1)    NOT NULL,
 
  CONSTRAINT direct_routes_pk PRIMARY KEY (id),
  CONSTRAINT direct_routes_unique UNIQUE(route_id, direct),
@@ -416,9 +432,9 @@ CREATE TABLE bus.timetable
 (
    id                 bigserial NOT NULL,
    schedule_group_id  bigint    NOT NULL,
-   time_A  time NOT NULL,
-   time_B  time NOT NULL,
-   frequency interval NOT NULL,
+   time_A             time      NOT NULL,
+   time_B             time      NOT NULL,
+   frequency interval           NOT NULL,
    
   CONSTRAINT timetable_pk PRIMARY KEY (id),
 
@@ -433,6 +449,7 @@ CREATE TABLE bus.graph_relations
   id 				  bigserial        	    NOT NULL,
   city_id 		      bigint 				NOT NULL,
   route_type_id       bus.route_type_enum   NOT NULL,
+  relation_type       bus.route_type_enum   NOT NULL,
   relation_a_id       integer 				NOT NULL,
   relation_b_id       integer 				NOT NULL,
   time_A              time 				    ,
@@ -442,6 +459,7 @@ CREATE TABLE bus.graph_relations
   wait_time           interval   			NOT NULL,
   cost_money          double precision 		NOT NULL,
   cost_time           double precision      NOT NULL,
+  distance            double precision      NOT NULL,
   
   CONSTRAINT graph_relations_pk PRIMARY KEY (id),
 

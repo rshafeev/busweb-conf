@@ -1,0 +1,35 @@
+﻿/*select * from bus.graph_relations where cost_money > 0 and 
+         relation_a_id <> bus.get_relation_input_id(bus.get_city_id(lang_enum('c_ru'),'Харьков'));*/
+CREATE OR REPLACE FUNCTION bus.insert_transitions_for_metro_transition(
+                                          _route_id     bigint,
+                                          _city_id      bigint
+
+) RETURNS SETOF bus.graph_relations AS
+$BODY$
+DECLARE
+  r 		     bus.graph_relations%ROWTYPE;
+  _foot_speed    double precision;
+  _route_raletion bus.route_relations%ROWTYPE;
+  transitions bus.route_relations[];
+BEGIN
+  FOR _route_raletion IN
+  (SELECT * from bus.route_relations 
+           JOIN bus.direct_routes ON bus.direct_routes.id = bus.route_relations.direct_route_id
+           JOIN bus.routes        ON bus.routes.id = bus.direct_routes.route_id
+           where 
+           city_id = _city_id and
+           route_type_id = 'c_route_metro_transition' and 
+           station_a_id IS NOT NULL)
+  LOOP
+      transitions := array_append(transitions,_route_raletion);
+  END LOOP;
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+select * from bus.insert_transitions_for_metro_transition(1,1);
+
+
+
+
+        

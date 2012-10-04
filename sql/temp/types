@@ -1,0 +1,33 @@
+﻿select * from bus.route_relations;
+drop type bus.filter_path;
+drop type bus.way_elem;
+CREATE TYPE bus.filter_path AS
+(
+   path_id                integer,
+   index                  integer,
+   direct_route_id        bigint,
+   route_type             bus.route_type_enum,
+   relation_index         integer,
+   relation_id            integer,
+   station_id             bigint, 
+   move_time              interval,
+   wait_time              interval,
+   cost                   double precision,
+   distance               double precision
+);	
+
+CREATE TYPE bus.way_elem AS
+(
+   path_id                integer,
+   index                  integer,
+   direct_route_id        bigint,
+   route_type             bus.route_type_enum,
+   relation_index         integer,
+   route_name             text,
+   station_name           text,
+   move_time              interval,
+   wait_time              interval,
+   cost                   double precision,
+   distance               double precision
+);	
+

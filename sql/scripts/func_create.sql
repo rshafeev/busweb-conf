@@ -23,8 +23,7 @@ CREATE OR REPLACE FUNCTION bus.drop_functions()
 RETURNS void AS
 $BODY$
 DECLARE
- --DROP TYPE bus.markers;
- --DROP TYPE bus.short_path;
+
 BEGIN
    DROP FUNCTION bus.init_system_data();
    DROP FUNCTION bus.insert_user_role( character);
@@ -34,16 +33,8 @@ BEGIN
    DROP FUNCTION bus.get_city_id (lang_enum, text);
    DROP FUNCTION bus.get_discount_id (lang_enum, text);
 
-   DROP FUNCTION bus.find_nearest_stations(geometry,bigint,bus.transport_type_enum[],double precision);
+   DROP FUNCTION bus.find_nearest_relations(geometry,bigint,bus.transport_type_enum[],double precision);
    DROP FUNCTION bus.data_clear();
-  /* DROP FUNCTION bus.shortest_ways(  	bigint,
- 		geometry,
-						 		geometry,
-						 	day_enum,
-						  	time without time zone,
-					         	double precision,
-					         	bus.transport_type_enum[],
-					            bigint);*/
    
 END;
 $BODY$
@@ -66,11 +57,15 @@ INSERT INTO bus.transport_types (id,ev_speed) VALUES ('c_trolley',45);
 INSERT INTO bus.transport_types (id,ev_speed) VALUES ('c_foot',5);
 
 INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_metro','c_metro');
-INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_metro_transition','c_foot');
 INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_trolley','c_trolley');
 INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_bus','c_bus');
 INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_tram','c_tram');
-INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_foot','c_foot');
+
+
+INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_station_input','c_foot');
+INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_transition','c_foot');
+INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_metro_transition','c_foot');
+
 
 
 INSERT INTO bus.languages(id,name) VALUES('c_en', 'English');
@@ -85,7 +80,6 @@ INSERT INTO bus.discounts (id) VALUES (default) RETURNING * INTO _discount;
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_discount.name_key,'c_ru','Отсутствует');
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_discount.name_key,'c_en','Dissapear');
 INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_metro'),1);
-
 INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_metro_transition'),1);
 
 
@@ -93,10 +87,12 @@ INSERT INTO bus.discounts (id) VALUES (default) RETURNING * INTO _discount;
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_discount.name_key,'c_ru','Студенческий');
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_discount.name_key,'c_en','Student');
 INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_metro'),0.5);
-INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_metro_transition'),0.0);
 INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_bus'),1);
-INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_trolley'),0.5);
-
+INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_trolley'),1);
+INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_tram'),1);
+INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_station_input'),1.0);
+INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_transition'),1.0);
+INSERT INTO bus.discount_by_route_types(discount_id,route_type_id,discount) VALUES (_discount.id,bus.route_type_enum('c_route_metro_transition'),0.0);
 --========================================================
    
 END;
@@ -141,70 +137,61 @@ $BODY$
 
 --====================================================================================================================	
 -- function returns sql-array of route_relation_id indexes
-CREATE OR REPLACE FUNCTION bus.find_nearest_stations(
+CREATE OR REPLACE FUNCTION bus.find_nearest_relations(
    _location geography,
    _city_id  bigint,
-   _transports bus.transport_type_enum[],
    max_distance double precision
 )
-RETURNS SETOF integer AS
+RETURNS SETOF bus.nearest_relation AS
 $BODY$
 DECLARE
-  _relation_id integer;
+  _relation bus.nearest_relation;
 BEGIN
-    FOR _relation_id IN SELECT bus.route_relations.id FROM bus.route_relations
-                   JOIN bus.stations           ON bus.stations.id = bus.route_relations.station_B_id  
-                   JOIN bus.station_transports ON bus.station_transports.station_id = bus.stations.id
-                   WHERE city_id = _city_id AND 
-                         st_distance(location,_location) < max_distance AND 
-                         transport_type_id =  ANY(_transports)
+    FOR _relation IN SELECT 
+                              bus.route_relations.id          as id ,
+                              st_distance(location,_location) as distance 
+                     FROM bus.route_relations
+                     JOIN bus.stations           ON bus.stations.id = bus.route_relations.station_B_id  
+                     WHERE city_id = _city_id AND 
+                         st_distance(location,_location) < max_distance 
     LOOP
-         RETURN NEXT _relation_id;
+         RETURN NEXT _relation;
    END LOOP;
     
 END;
 $BODY$
   LANGUAGE plpgsql VOLATILE  COST 100;	
   
-/*
-
-CREATE OR REPLACE FUNCTION bus.find_shortest_ways(
-									city_id  bigint,
-									p1 geometry,
-									p2 geometry,
-									v_day_id day_enum,
-									time_start  time without time zone,
-									max_distance double precision)
-RETURNS SETOF bus.way AS
+--====================================================================================================================	
+-- function returns sql-array of route_relation_id indexes
+CREATE OR REPLACE FUNCTION bus.find_nearest_relations(
+   _location geography,
+   _city_id  bigint,
+   _transports bus.transport_type_enum[],
+   max_distance double precision
+)
+RETURNS SETOF bus.nearest_relation AS
 $BODY$
 DECLARE
-  role_id bigint;
+  _relation bus.nearest_relation;
 BEGIN
-  INSERT INTO bus.user_roles (name)  VALUES(role_name) RETURNING id INTO role_id;
-  RETURN role_id;
+    FOR _relation IN SELECT 
+                              bus.route_relations.id          as id ,
+                              st_distance(location,_location) as distance 
+                     FROM bus.route_relations
+                     JOIN bus.stations           ON bus.stations.id = bus.route_relations.station_B_id  
+                     JOIN bus.station_transports ON bus.station_transports.station_id = bus.stations.id
+                     WHERE city_id = _city_id AND 
+                         st_distance(location,_location) < max_distance AND 
+                         transport_type_id =  ANY(_transports)
+    LOOP
+         RETURN NEXT _relation;
+   END LOOP;
+    
 END;
 $BODY$
   LANGUAGE plpgsql VOLATILE  COST 100;	
-  */
-/*
-CREATE OR REPLACE FUNCTION bus.find_shortest_way( 
-							v_stationA_id        bigint,
- 						    v_stationB_id        bigint,
- 						    v_day_id             day_enum,
- 						    time_start           time without time zone)
-RETURNS SETOF bus.way AS
-$BODY$
-DECLARE
-  role_id bigint;
-BEGIN
-  INSERT INTO bus.user_roles (name)  VALUES(role_name) RETURNING id INTO role_id;
-  RETURN role_id;
-END;
-$BODY$
-  LANGUAGE plpgsql VOLATILE  COST 100;	
-*/
-
- 
+  
 --====================================================================================================================
 CREATE OR REPLACE FUNCTION bus.insert_user_role(role_name character)
 RETURNS bigint AS
