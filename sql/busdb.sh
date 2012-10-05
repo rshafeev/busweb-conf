@@ -38,12 +38,12 @@ case "$2" in
     psql -U postgres -f /usr/share/postlbs/routing_core.sql $DATABASE
     psql -U postgres -f /usr/share/postlbs/routing_core_wrappers.sql $DATABASE
 	# With TSP
-	psql -U postgres -f /usr/share/postlbs/routing_tsp.sql $DATABASE
-	psql -U postgres -f /usr/share/postlbs/routing_tsp_wrappers.sql $DATABASE
+	#psql -U postgres -f /usr/share/postlbs/routing_tsp.sql $DATABASE
+	#psql -U postgres -f /usr/share/postlbs/routing_tsp_wrappers.sql $DATABASE
 
 	# With Driving Distance
-	psql -U postgres -f /usr/share/postlbs/routing_dd.sql $DATABASE
-	psql -U postgres -f /usr/share/postlbs/routing_dd_wrappers.sql $DATABASE
+	#psql -U postgres -f /usr/share/postlbs/routing_dd.sql $DATABASE
+	#psql -U postgres -f /usr/share/postlbs/routing_dd_wrappers.sql $DATABASE
     exit
 ;;
 "drop")
@@ -51,9 +51,6 @@ case "$2" in
     exit
 ;;
 "update_structure")
-     psql -f $SCRIPT_DIR/data_clear.sql -d  $DATABASE
-     psql -f $SCRIPT_DIR/triggers_clear.sql -d  $DATABASE
-     psql -f $SCRIPT_DIR/func_clear.sql -d  $DATABASE
      psql -f $SCRIPT_DIR/db_drop.sql -d  $DATABASE
      
      psql -f $SCRIPT_DIR/db_create.sql -d  $DATABASE
