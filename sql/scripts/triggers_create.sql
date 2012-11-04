@@ -151,15 +151,7 @@ CREATE TRIGGER station_deletename_key_trigger
 AFTER DELETE ON bus.stations
 FOR EACH  ROW EXECUTE PROCEDURE bus.delete_name_key();
 
-/*
-CREATE TRIGGER station_insert_trigger
-AFTER INSERT ON bus.stations
-FOR EACH  ROW EXECUTE PROCEDURE bus.on_insert_station();
 
-CREATE TRIGGER station_delete_trigger
-BEFORE DELETE ON bus.stations 
-FOR EACH  ROW EXECUTE PROCEDURE bus.on_delete_station();
-*/
 -- Route triggers
 
 CREATE TRIGGER route_createname_key_trigger

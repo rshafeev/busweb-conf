@@ -1,4 +1,47 @@
-﻿CREATE OR REPLACE FUNCTION bus.__clean_paths_table(_relation_input_id integer)
+﻿
+CREATE OR REPLACE FUNCTION bus.insert_route_relation(
+												 _direct_route_id	bigint,
+												 _station_A_id 		bigint, 
+												 _station_B_id 		bigint,
+												 _index        		bigint,
+												 _geom               geography
+												) 
+RETURNS bigint AS
+$BODY$
+DECLARE
+  _speed                double precision; 
+  _distance             double precision;
+  _time                 interval;
+  _id                   bigint;
+BEGIN
+  _speed := 1;
+  SELECT bus.transport_types.ev_speed INTO _speed
+  FROM bus.direct_routes 
+    JOIN bus.routes ON bus.routes.id = bus.direct_routes.route_id 
+    JOIN bus.route_types ON bus.route_types.id = bus.routes.route_type_id
+    JOIN bus.transport_types ON bus.transport_types.id = bus.route_types.transport_id
+  WHERE bus.direct_routes.id  = _direct_route_id;
+  IF _geom IS NOT NULL THEN
+    _distance := st_length(geography(_geom),false);
+  ELSE
+    _distance := 0;
+  END IF;
+  
+  _time := _distance/1000.0/_speed * interval '1 hour';
+	if _station_A_id <=0 THEN
+	_station_A_id:= null;
+	END IF;
+	if _station_B_id <=0 THEN
+	_station_A_id:= null;
+	END IF;
+   INSERT INTO bus.route_relations (direct_route_id,station_A_id,station_B_id,position_index,geom,ev_time,distance) 
+          VALUES (_direct_route_id,_station_A_id,_station_B_id,_index,_geom,_time,_distance) RETURNING id INTO  _id;
+  RETURN _id;
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+--===============================================================================================================
+CREATE OR REPLACE FUNCTION bus.__clean_paths_table(_relation_input_id integer)
 RETURNS  void AS
 $BODY$
 DECLARE
@@ -119,7 +162,7 @@ BEGIN
 	       JOIN use_routes ON use_routes.id = bus.graph_relations.relation_type 
 	       where city_id = _city_id AND
 	             (time_a IS NULL OR (_time_start >= time_a AND _time_start <= time_b)) AND 
-	             (day_id=_day_id or day_id IS NULL);
+	             (day_id=_day_id or day_id = day_enum('c_all'));
 
   ELSEIF _alg_strategy = bus.alg_strategy('c_cost') THEN
   
@@ -129,7 +172,7 @@ BEGIN
 	       JOIN use_routes ON use_routes.id = bus.graph_relations.relation_type 
 	       where city_id = _city_id AND
 	             (time_a IS NULL OR (_time_start >= time_a AND _time_start <= time_b)) AND 
-	             (day_id=_day_id or day_id IS NULL);
+	             (day_id=_day_id or day_id = day_enum('c_all'));
   ELSE
         CREATE TEMPORARY TABLE graph ON COMMIT DROP AS
 	select bus.graph_relations.id, 
@@ -140,7 +183,7 @@ BEGIN
 	       JOIN use_routes ON use_routes.id = bus.graph_relations.route_type_id 
 	       where city_id = _city_id AND
 	             (time_a IS NULL OR (_time_start >= time_a AND _time_start <= time_b)) AND 
-	             (day_id=_day_id or day_id IS NULL);
+	             (day_id=_day_id or day_id = day_enum('c_all'));
   END IF;
 
 

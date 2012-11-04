@@ -20,7 +20,8 @@ CREATE TYPE day_enum AS ENUM
       'c_Wednesday',
       'c_Thursday',
       'c_Friday',
-      'c_Saturday'
+      'c_Saturday',
+      'c_all'
    );
    
 CREATE TYPE bus.transport_type_enum AS ENUM
@@ -259,6 +260,8 @@ CREATE TABLE bus.cities
   lat 			double precision 	NOT NULL,
   lon 			double precision 	NOT NULL,
   scale 		bigint 				NOT NULL,
+  is_show       bit(1)              NOT NULL,
+       
   CONSTRAINT city_pk PRIMARY KEY (id),
 
   CONSTRAINT city_name_fk FOREIGN KEY (name_key)
@@ -323,7 +326,7 @@ CREATE TABLE bus.routes
   cost  			double precision 		NOT NULL,
   route_type_id 	bus.route_type_enum 	NOT NULL,
   number 			character varying(128)  NOT NULL,
-  name_key 			bigint,
+  name_key 			bigint					,
   
   CONSTRAINT routes_pk PRIMARY KEY (id),
 
@@ -368,7 +371,7 @@ CREATE TABLE bus.route_relations
   position_index    bigint    		 		NOT NULL,
   distance          double precision	    NOT NULL,  -- kilometers
   ev_time           interval    	 		NOT NULL,  -- seconds
-  geom              GEOGRAPHY(MULTILINESTRING,4326)	,
+  geom              GEOGRAPHY(LINESTRING,4326)	,
   CONSTRAINT route_relations_pk PRIMARY KEY (id),
 
   CONSTRAINT route_relations_directroute_id_fk FOREIGN KEY (direct_route_id)
@@ -417,7 +420,7 @@ CREATE TABLE bus.schedule_group_days
 (
   id                 bigserial NOT NULL,
   schedule_group_id  bigint    NOT NULL,
-  day_id 		     day_enum ,
+  day_id 		     day_enum  NOT NULL,
 
   CONSTRAINT schedule_group_days_pk PRIMARY KEY (id),
 
@@ -454,7 +457,7 @@ CREATE TABLE bus.graph_relations
   relation_b_id       integer 				NOT NULL,
   time_A              time 				    ,
   time_B              time 				    ,
-  day_id              day_enum 				,
+  day_id              day_enum 				NOT NULL,
   move_time           interval   			NOT NULL,
   wait_time           interval   			NOT NULL,
   cost_money          double precision 		NOT NULL,
@@ -476,8 +479,22 @@ CREATE TABLE bus.graph_relations
 
 );
 
-
 --================
+CREATE TABLE bus.import_objects
+(
+  id			bigserial 			 NOT NULL,
+  city_id   	bigint    			 NOT NULL,
+  route_type    bus.route_type_enum  NOT NULL,
+  route_number  text                 NOT NULL,
+  obj           text         		 NOT NULL,
+
+ CONSTRAINT import_objectss_pk PRIMARY KEY (id),
+
+ CONSTRAINT import_objects_city_id_fk FOREIGN KEY (city_id)
+      REFERENCES bus.cities (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE NO ACTION
+);
+
 --================
 
 

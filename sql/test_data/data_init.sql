@@ -228,7 +228,7 @@ BEGIN
         r2.id          			    				 as relation_b_id,
         null                  						 as time_a,
         null   	                    				 as time_b,
-        null                        				 as day_id,
+        day_enum('c_all')							 as day_id,
         interval '00:00:00'                          as wait_time,
         (r2.ev_time + _pause)   					 as move_time,
 		0                                            as cost_money,
@@ -294,7 +294,7 @@ BEGIN
     IF _station_A_id  IS NOT NULL AND _station_B_id IS NOT NULL THEN
 		SELECT location INTO _p1 FROM bus.stations WHERE id = _station_A_id;
 		SELECT location INTO _p2 FROM bus.stations WHERE id = _station_B_id;
-		_geom := st_multi(st_makeline(_p1,_p2));
+		_geom := st_makeline(ARRAY [_p1,_p2,_p2,_p2]);
 		_distance := st_length(_geom,false);
 		_time := _distance/1000.0/_transport_speed * interval '1 hour';
     ELSE
@@ -379,7 +379,7 @@ BEGIN
  -- insert schedule
  INSERT INTO bus.schedule (direct_route_id) VALUES(_direct_route_id) RETURNING id INTO _schedule_id;
  INSERT INTO bus.schedule_groups (schedule_id) VALUES (_schedule_id) RETURNING id INTO _schedule_group_id;
- INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,null);
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_all'));
 /*
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Sunday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Saturday'));
@@ -393,7 +393,7 @@ BEGIN
 
  INSERT INTO bus.schedule (direct_route_id) VALUES(_reverse_route_id) RETURNING id INTO _schedule_id;
  INSERT INTO bus.schedule_groups (schedule_id) VALUES (_schedule_id) RETURNING id INTO _schedule_group_id;
- INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,null);
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_all'));
  /*
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Sunday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Saturday'));
@@ -739,11 +739,11 @@ SELECT * INTO v_id FROM bus.insert_user('admin','marianna','14R199009');
 
 -- insert cities --
 
-INSERT INTO bus.cities (lat,lon,scale) VALUES(50,36,10) RETURNING  * INTO kharkov;
+INSERT INTO bus.cities (lat,lon,scale,is_show) VALUES(50,36,10,B'1') RETURNING  * INTO kharkov;
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(kharkov.name_key,'c_ru','Харьков');
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(kharkov.name_key,'c_en','Kharkov');
 
-INSERT INTO bus.cities (lat,lon,scale) VALUES(50,30,8) RETURNING  * INTO kiev;
+INSERT INTO bus.cities (lat,lon,scale,is_show) VALUES(50,30,8,B'1') RETURNING  * INTO kiev;
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(kiev.name_key,'c_ru','Киев');
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(kiev.name_key,'c_en','Kiev');
 
