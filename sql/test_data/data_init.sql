@@ -739,13 +739,13 @@ SELECT * INTO v_id FROM bus.insert_user('admin','marianna','14R199009');
 
 -- insert cities --
 
-INSERT INTO bus.cities (lat,lon,scale,is_show) VALUES(50,36,10,B'1') RETURNING  * INTO kharkov;
+INSERT INTO bus.cities (key,lat,lon,scale,is_show) VALUES('kharkiv',50,36,10,B'1') RETURNING  * INTO kharkov;
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(kharkov.name_key,'c_ru','Харьков');
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(kharkov.name_key,'c_en','Kharkov');
 
-INSERT INTO bus.cities (lat,lon,scale,is_show) VALUES(50,30,8,B'1') RETURNING  * INTO kiev;
+INSERT INTO bus.cities (key,lat,lon,scale,is_show) VALUES('kyiv', 50,30,8,B'1') RETURNING  * INTO kiev;
 INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(kiev.name_key,'c_ru','Киев');
-INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(kiev.name_key,'c_en','Kiev');
+INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(kiev.name_key,'c_en','Kyiv');
 
 
 -- insert stations to Kharkov

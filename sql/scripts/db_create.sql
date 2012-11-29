@@ -256,12 +256,13 @@ WITH (
 CREATE TABLE bus.cities
 (
   id 			bigserial 			NOT NULL,
+  key           text                NOT NULL,
   name_key      bigint				NOT NULL,
   lat 			double precision 	NOT NULL,
   lon 			double precision 	NOT NULL,
   scale 		bigint 				NOT NULL,
   is_show       bit(1)              NOT NULL,
-       
+      
   CONSTRAINT city_pk PRIMARY KEY (id),
 
   CONSTRAINT city_name_fk FOREIGN KEY (name_key)
