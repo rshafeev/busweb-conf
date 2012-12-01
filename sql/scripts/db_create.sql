@@ -126,7 +126,6 @@ CREATE TABLE bus.transport_types
 (
   id 		bus.transport_type_enum	NOT NULL,
   ev_speed 	double precision 	    NOT NULL,
-  
   CONSTRAINT    "transport_type_pk" PRIMARY KEY (id)
 )
 WITH (
@@ -139,6 +138,7 @@ CREATE TABLE bus.route_types
 (
   id 		    bus.route_type_enum	    NOT NULL,
   transport_id 	bus.transport_type_enum	NOT NULL,
+  visible       BIT(1)   			    NOT NULL,
   
   CONSTRAINT    "route_type_pk" PRIMARY KEY (id),
   CONSTRAINT route_type_transporttype_fk FOREIGN KEY (transport_id)

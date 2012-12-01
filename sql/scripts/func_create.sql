@@ -405,15 +405,14 @@ INSERT INTO bus.transport_types (id,ev_speed) VALUES ('c_tram',48);
 INSERT INTO bus.transport_types (id,ev_speed) VALUES ('c_trolley',45);
 INSERT INTO bus.transport_types (id,ev_speed) VALUES ('c_foot',5);
 
-INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_metro','c_metro');
-INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_trolley','c_trolley');
-INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_bus','c_bus');
-INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_tram','c_tram');
+INSERT INTO bus.route_types (id,transport_id,visible) VALUES ('c_route_metro','c_metro',B'1');
+INSERT INTO bus.route_types (id,transport_id,visible) VALUES ('c_route_trolley','c_trolley',B'1');
+INSERT INTO bus.route_types (id,transport_id,visible) VALUES ('c_route_bus','c_bus',B'1');
+INSERT INTO bus.route_types (id,transport_id,visible) VALUES ('c_route_tram','c_tram',B'1');
 
-
-INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_station_input','c_foot');
-INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_transition','c_foot');
-INSERT INTO bus.route_types (id,transport_id) VALUES ('c_route_metro_transition','c_foot');
+INSERT INTO bus.route_types (id,transport_id,visible) VALUES ('c_route_station_input','c_foot',B'0');
+INSERT INTO bus.route_types (id,transport_id,visible) VALUES ('c_route_transition','c_foot',B'0');
+INSERT INTO bus.route_types (id,transport_id,visible) VALUES ('c_route_metro_transition','c_foot',B'0');
 
 
 
