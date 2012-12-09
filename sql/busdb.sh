@@ -35,8 +35,8 @@ case "$2" in
 "create")
     echo $PORT
     sudo -u postgres createdb -h $HOST -p $PORT -U $USER $DATABASE -T $TEMPLATE_DB
-    sudo -u postgres psql -U postgres -f /usr/share/postlbs/routing_core.sql $DATABASE
-    sudo -u postgres psql -U postgres -f /usr/share/postlbs/routing_core_wrappers.sql $DATABASE
+    sudo -u postgres psql -U postgres -f $PGROUTING_DIR/routing_core.sql $DATABASE
+    sudo -u postgres psql -U postgres -f $PGROUTING_DIR/routing_core_wrappers.sql $DATABASE
 	# With TSP
 	#psql -U postgres -f /usr/share/postlbs/routing_tsp.sql $DATABASE
 	#psql -U postgres -f /usr/share/postlbs/routing_tsp_wrappers.sql $DATABASE
