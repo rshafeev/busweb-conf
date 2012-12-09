@@ -86,13 +86,13 @@ $BODY$
 CREATE OR REPLACE FUNCTION bus.shortest_ways(	_city_id  	bigint,
 						_p1 		geography,
 						_p2 		geography,
-						_day_id 	day_enum,
+						_day_id 	bus.day_enum,
 						_time_start  	time,
 					        _max_distance 	double precision,
 					        _route_types 	text[],
 					        _discounts      double precision[],
 					        _alg_strategy   bus.alg_strategy,
-					        _lang_id        lang_enum)
+					        _lang_id        bus.lang_enum)
 RETURNS SETOF bus.way_elem AS
 $BODY$
 DECLARE
@@ -162,7 +162,7 @@ BEGIN
 	       JOIN use_routes ON use_routes.id = bus.graph_relations.relation_type 
 	       where city_id = _city_id AND
 	             (time_a IS NULL OR (_time_start >= time_a AND _time_start <= time_b)) AND 
-	             (day_id=_day_id or day_id = day_enum('c_all'));
+	             (day_id=_day_id or day_id = bus.day_enum('c_all'));
 
   ELSEIF _alg_strategy = bus.alg_strategy('c_cost') THEN
   
@@ -172,7 +172,7 @@ BEGIN
 	       JOIN use_routes ON use_routes.id = bus.graph_relations.relation_type 
 	       where city_id = _city_id AND
 	             (time_a IS NULL OR (_time_start >= time_a AND _time_start <= time_b)) AND 
-	             (day_id=_day_id or day_id = day_enum('c_all'));
+	             (day_id=_day_id or day_id = bus.day_enum('c_all'));
   ELSE
         CREATE TEMPORARY TABLE graph ON COMMIT DROP AS
 	select bus.graph_relations.id, 
@@ -183,7 +183,7 @@ BEGIN
 	       JOIN use_routes ON use_routes.id = bus.graph_relations.route_type_id 
 	       where city_id = _city_id AND
 	             (time_a IS NULL OR (_time_start >= time_a AND _time_start <= time_b)) AND 
-	             (day_id=_day_id or day_id = day_enum('c_all'));
+	             (day_id=_day_id or day_id = bus.day_enum('c_all'));
   END IF;
 
 
@@ -379,8 +379,8 @@ BEGIN
    DROP FUNCTION bus.insert_user(bigint,character, character);
    DROP FUNCTION bus.insert_user(character,character, character);
    DROP FUNCTION bus.authenticate(character,character, character);
-   DROP FUNCTION bus.get_city_id (lang_enum, text);
-   DROP FUNCTION bus.get_discount_id (lang_enum, text);
+   DROP FUNCTION bus.get_city_id (bus.lang_enum, text);
+   DROP FUNCTION bus.get_discount_id (bus.lang_enum, text);
 
    DROP FUNCTION bus.find_nearest_relations(geometry,bigint,bus.transport_type_enum[],double precision);
    DROP FUNCTION bus.data_clear();
@@ -448,7 +448,7 @@ $BODY$
   LANGUAGE plpgsql VOLATILE
   COST 100;		
 --====================================================================================================================	
-CREATE OR REPLACE FUNCTION bus.get_city_id (_lang lang_enum, _name text)
+CREATE OR REPLACE FUNCTION bus.get_city_id (_lang bus.lang_enum, _name text)
 RETURNS  bigint AS
 $BODY$
 DECLARE
@@ -466,7 +466,7 @@ $BODY$
   LANGUAGE plpgsql VOLATILE
   COST 100;		
 --====================================================================================================================	
-CREATE OR REPLACE FUNCTION bus.get_discount_id (_lang lang_enum, _name text)
+CREATE OR REPLACE FUNCTION bus.get_discount_id (_lang bus.lang_enum, _name text)
 RETURNS  bigint AS
 $BODY$
 DECLARE

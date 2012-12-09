@@ -3,7 +3,7 @@
 CREATE SCHEMA bus;
         
 --======================================= Create types ===========================================================
-CREATE TYPE lang_enum AS ENUM
+CREATE TYPE bus.lang_enum AS ENUM
    (
      'c_en',
      'c_ru',
@@ -12,7 +12,7 @@ CREATE TYPE lang_enum AS ENUM
      'c_kk'
    );
    
-CREATE TYPE day_enum AS ENUM
+CREATE TYPE bus.day_enum AS ENUM
    ( 
       'c_Sunday',
       'c_Monday',
@@ -114,7 +114,7 @@ CREATE TYPE bus.path_elem AS
 --============================================ create table - enums ========================================================
 CREATE TABLE bus.languages
 (
-  id        lang_enum              NOT NULL,
+  id        bus.lang_enum              NOT NULL,
   name      character varying(50)  NOT NULL,
   
   CONSTRAINT languages_pk PRIMARY KEY (id)
@@ -193,7 +193,7 @@ CREATE TABLE bus.string_values
 (
   id       bigserial    NOT NULL,
   key_id   bigint       NOT NULL,
-  lang_id  lang_enum    NOT NULL,
+  lang_id  bus.lang_enum    NOT NULL,
   value    text         NOT NULL,
 
 
@@ -421,7 +421,7 @@ CREATE TABLE bus.schedule_group_days
 (
   id                 bigserial NOT NULL,
   schedule_group_id  bigint    NOT NULL,
-  day_id 		     day_enum  NOT NULL,
+  day_id 		     bus.day_enum  NOT NULL,
 
   CONSTRAINT schedule_group_days_pk PRIMARY KEY (id),
 
@@ -458,7 +458,7 @@ CREATE TABLE bus.graph_relations
   relation_b_id       integer 				NOT NULL,
   time_A              time 				    ,
   time_B              time 				    ,
-  day_id              day_enum 				NOT NULL,
+  day_id              bus.day_enum 				NOT NULL,
   move_time           interval   			NOT NULL,
   wait_time           interval   			NOT NULL,
   cost_money          double precision 		NOT NULL,
@@ -484,16 +484,12 @@ CREATE TABLE bus.graph_relations
 CREATE TABLE bus.import_objects
 (
   id			bigserial 			 NOT NULL,
-  city_id   	bigint    			 NOT NULL,
+  city_key   	text    			 NOT NULL,
   route_type    bus.route_type_enum  NOT NULL,
   route_number  text                 NOT NULL,
   obj           text         		 NOT NULL,
-
- CONSTRAINT import_objectss_pk PRIMARY KEY (id),
-
- CONSTRAINT import_objects_city_id_fk FOREIGN KEY (city_id)
-      REFERENCES bus.cities (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE NO ACTION
+ 
+ CONSTRAINT import_objectss_pk PRIMARY KEY (id)
 );
 
 --================

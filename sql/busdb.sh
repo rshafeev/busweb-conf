@@ -34,9 +34,9 @@ DIRECTORY="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 case "$2" in
 "create")
     echo $PORT
-    createdb -h $HOST -p $PORT -U $USER $DATABASE -T $TEMPLATE_DB
-    psql -U postgres -f /usr/share/postlbs/routing_core.sql $DATABASE
-    psql -U postgres -f /usr/share/postlbs/routing_core_wrappers.sql $DATABASE
+    sudo -u postgres createdb -h $HOST -p $PORT -U $USER $DATABASE -T $TEMPLATE_DB
+    sudo -u postgres psql -U postgres -f /usr/share/postlbs/routing_core.sql $DATABASE
+    sudo -u postgres psql -U postgres -f /usr/share/postlbs/routing_core_wrappers.sql $DATABASE
 	# With TSP
 	#psql -U postgres -f /usr/share/postlbs/routing_tsp.sql $DATABASE
 	#psql -U postgres -f /usr/share/postlbs/routing_tsp_wrappers.sql $DATABASE
@@ -46,32 +46,73 @@ case "$2" in
 	#psql -U postgres -f /usr/share/postlbs/routing_dd_wrappers.sql $DATABASE
     exit
 ;;
+"close")
+    sudo -u postgres psql -c "SELECT pg_terminate_backend(pg_stat_activity.procpid) FROM pg_stat_activity WHERE pg_stat_activity.datname = '"$DATABASE"'" -d  $DATABASE;
+	exit;
+;;
 "drop")
-    dropdb -h $HOST -p $PORT -U $USER $DATABASE
+    sudo -u postgres psql -c "SELECT pg_terminate_backend(pg_stat_activity.procpid) FROM pg_stat_activity WHERE pg_stat_activity.datname = '"$DATABASE"'" -d  $DATABASE;
+	sudo -u postgres dropdb -h $HOST -p $PORT -U $USER $DATABASE
     exit
 ;;
 "update_structure")
-     psql -f $SCRIPT_DIR/db_drop.sql -d  $DATABASE
-     
-     psql -f $SCRIPT_DIR/db_create.sql -d  $DATABASE
-     psql -f $SCRIPT_DIR/func_create.sql -d  $DATABASE
-     psql -f $SCRIPT_DIR/triggers_create.sql -d  $DATABASE
+     sudo -u postgres psql -f $SCRIPT_DIR/db_drop.sql -d  $DATABASE
+     sudo -u postgres psql -f $SCRIPT_DIR/db_create.sql -d  $DATABASE
+     sudo -u postgres psql -f $SCRIPT_DIR/func_create.sql -d  $DATABASE
+     sudo -u postgres psql -f $SCRIPT_DIR/triggers_create.sql -d  $DATABASE
      exit
 ;;
 "update_data")
-     psql -f $SCRIPT_DIR/data_clear.sql -d  $DATABASE
-     psql -f $DATA_DIR/data_init.sql -d $DATABASE
+     sudo -u postgres psql -f $SCRIPT_DIR/data_clear.sql -d  $DATABASE
+     sudo -u postgres psql -f $DATA_DIR/data_init.sql -d $DATABASE
      exit
 ;;
 "update_funcs")
-     psql -f $SCRIPT_DIR/func_clear.sql -d  $DATABASE
-     psql -f $SCRIPT_DIR/func_create.sql -d  $DATABASE
+     sudo -u postgres psql -f $SCRIPT_DIR/func_clear.sql -d  $DATABASE
+     sudo -u postgres psql -f $SCRIPT_DIR/func_create.sql -d  $DATABASE
      exit
 ;;
 "update_triggers")
-     psql -f $SCRIPT_DIR/triggers_clear.sql -d  $DATABASE
-     psql -f $SCRIPT_DIR/triggers_create.sql -d  $DATABASE
+     sudo -u postgres psql -f $SCRIPT_DIR/triggers_clear.sql -d  $DATABASE
+     sudo -u postgres psql -f $SCRIPT_DIR/triggers_create.sql -d  $DATABASE
      exit
+;;
+"dump_obj")
+	echo 'saving IOBJ DUMP to file: ' $DUMP_DIR'/dump_obj.sql'
+	chown -R postgres $DUMP_DIR
+	chgrp -R postgres $DUMP_DIR
+	chmod 750 -R $DUMP_DIR
+	sudo -u postgres pg_dump -f $DUMP_DIR/dump_obj.sql -c -t bus.import_objects $DATABASE
+	echo 'ok.'
+	exit
+;;
+"dump")
+	echo 'saving FULL DUMP to file: ' $DUMP_DIR'/dump.sql'
+	chown -R postgres $DUMP_DIR
+	chgrp -R postgres $DUMP_DIR
+	chmod 750 -R $DUMP_DIR
+	sudo -u postgres pg_dump -f $DUMP_DIR/dump.sql --schema 'bus' -c  $DATABASE
+	echo 'ok.'
+	exit
+;;
+"restore_obj")
+	echo 'restore from file: ' $DUMP_DIR'/dump_obj.sql'
+	chown -R postgres $DUMP_DIR
+	chgrp -R postgres $DUMP_DIR
+	chmod 750 -R $DUMP_DIR
+	sudo -u postgres psql -f $DUMP_DIR/dump_obj.sql -d  $DATABASE
+	echo 'ok.'
+	exit
+;;
+"restore")
+	echo 'restore from file: ' $DUMP_DIR'/dump.sql'
+	chown -R postgres $DUMP_DIR
+	chgrp -R postgres $DUMP_DIR
+	chmod 750 -R $DUMP_DIR
+	
+	sudo -u postgres psql -f $DUMP_DIR/dump.sql -d  $DATABASE
+	echo 'ok.'
+	exit
 ;;    
 "help")
     help

@@ -228,7 +228,7 @@ BEGIN
         r2.id          			    				 as relation_b_id,
         null                  						 as time_a,
         null   	                    				 as time_b,
-        day_enum('c_all')							 as day_id,
+        bus.day_enum('c_all')							 as day_id,
         interval '00:00:00'                          as wait_time,
         (r2.ev_time + _pause)   					 as move_time,
 		0                                            as cost_money,
@@ -352,7 +352,7 @@ BEGIN
  i := 0;
  WHILE i< array_upper(_names,1) LOOP
    --RAISE NOTICE ' % : %', _names[i+1][1],_names[i+1][2];
-   INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_route.name_key,lang_enum(_names[i+1][1]),_names[i+1][2]);
+   INSERT INTO bus.string_values(key_id,lang_id,value) VALUES(_route.name_key,bus.lang_enum(_names[i+1][1]),_names[i+1][2]);
    i:= i + 1;
  END LOOP;
  
@@ -379,7 +379,7 @@ BEGIN
  -- insert schedule
  INSERT INTO bus.schedule (direct_route_id) VALUES(_direct_route_id) RETURNING id INTO _schedule_id;
  INSERT INTO bus.schedule_groups (schedule_id) VALUES (_schedule_id) RETURNING id INTO _schedule_group_id;
- INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_all'));
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,bus.day_enum('c_all'));
 /*
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Sunday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Saturday'));
@@ -393,7 +393,7 @@ BEGIN
 
  INSERT INTO bus.schedule (direct_route_id) VALUES(_reverse_route_id) RETURNING id INTO _schedule_id;
  INSERT INTO bus.schedule_groups (schedule_id) VALUES (_schedule_id) RETURNING id INTO _schedule_group_id;
- INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_all'));
+ INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,bus.day_enum('c_all'));
  /*
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Sunday'));
  INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Saturday'));
