@@ -47,11 +47,11 @@ case "$2" in
     exit
 ;;
 "close")
-    sudo -u postgres psql -c "SELECT pg_terminate_backend(pg_stat_activity.procpid) FROM pg_stat_activity WHERE pg_stat_activity.datname = '"$DATABASE"'" -d  $DATABASE;
+    sudo -u postgres psql -c "SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity WHERE pg_stat_activity.datname = '"$DATABASE"'" -d  $DATABASE;
 	exit;
 ;;
 "drop")
-    sudo -u postgres psql -c "SELECT pg_terminate_backend(pg_stat_activity.procpid) FROM pg_stat_activity WHERE pg_stat_activity.datname = '"$DATABASE"'" -d  $DATABASE;
+    sudo -u postgres psql -c "SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity WHERE pg_stat_activity.datname = '"$DATABASE"'" -d  $DATABASE;
 	sudo -u postgres dropdb -h $HOST -p $PORT -U $USER $DATABASE
     exit
 ;;

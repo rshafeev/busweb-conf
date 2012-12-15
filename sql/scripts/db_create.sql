@@ -107,7 +107,18 @@ CREATE TYPE bus.path_elem AS
      graph_id    bigint
 );
 
-
+-- create views
+CREATE OR REPLACE VIEW bus.time_routes AS 
+ SELECT routes.id AS route_id, avg(timetable.frequency) AS freq, 
+    min(timetable.time_a) AS time_a, max(timetable.time_b) AS time_b
+   FROM bus.routes
+   JOIN bus.direct_routes ON direct_routes.route_id = routes.id
+   JOIN bus.schedule ON schedule.direct_route_id = direct_routes.id
+   JOIN bus.schedule_groups ON schedule_groups.schedule_id = schedule.id
+   JOIN bus.timetable ON timetable.schedule_group_id = schedule_groups.id
+  WHERE direct_routes.direct = B'1'::"bit"
+  GROUP BY routes.id;
+  
 
 
 
@@ -479,7 +490,35 @@ CREATE TABLE bus.graph_relations
   
 
 );
+--================
+CREATE TABLE bus._graph_relations
+(
+  id 				  bigserial        	    NOT NULL,
+  city_id 		      bigint 				NOT NULL,
+  route_type_id       bus.route_type_enum   NOT NULL,
+  relation_type       bus.route_type_enum   NOT NULL,
+  relation_a_id       integer 				NOT NULL,
+  relation_b_id       integer 				NOT NULL,
+  move_time           interval   			NOT NULL,
+  wait_time           interval   			NOT NULL,
+  cost_money          double precision 		NOT NULL,
+  cost_time           double precision      NOT NULL,
+  distance            double precision      NOT NULL,
+  
+  CONSTRAINT _graph_relations_pk PRIMARY KEY (id),
 
+  CONSTRAINT _graph_relations_city_id_fk FOREIGN KEY (city_id)
+      REFERENCES bus.cities (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT _graph_relations_relation_a_id_fk FOREIGN KEY (relation_a_id)
+      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+   CONSTRAINT _graph_relations_relation_b_id_fk FOREIGN KEY (relation_b_id)
+      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+  
+
+);
 --================
 CREATE TABLE bus.import_objects
 (
