@@ -72,6 +72,10 @@ case "$2" in
      sudo -u postgres psql -f $SCRIPT_DIR/func_create.sql -d  $DATABASE
      exit
 ;;
+"drop_funcs")
+     sudo -u postgres psql -f $SCRIPT_DIR/func_clear.sql -d  $DATABASE
+     exit
+;;
 "update_triggers")
      sudo -u postgres psql -f $SCRIPT_DIR/triggers_clear.sql -d  $DATABASE
      sudo -u postgres psql -f $SCRIPT_DIR/triggers_create.sql -d  $DATABASE
