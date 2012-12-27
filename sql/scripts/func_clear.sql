@@ -12,7 +12,7 @@ BEGIN
  LOOP
    BEGIN
      EXECUTE query;
-     RAISE NOTICE 'query: %',query;
+     --RAISE NOTICE 'query: %',query;
      EXCEPTION  WHEN OTHERS THEN 
 	        RAISE  NOTICE 'Warning! Can not execute: %', query;
    END;

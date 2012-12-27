@@ -1,4 +1,0 @@
-#ifndef SHORTESTWAYS_H
-#define SHORTESTWAYS_H
-
-#endif // SHORTESTWAYS_H

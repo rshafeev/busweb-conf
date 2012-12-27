@@ -4,6 +4,13 @@ SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity WHERE pg
 select bus.update_graph_relations(id) from bus.routes WHERE route_type_id <> bus.route_type_enum('c_route_station_input') LIMIT 10;
 */
 
+--==========================================================================================================================  
+
+CREATE OR REPLACE FUNCTION bus.lib_shortest_paths(sql text, source_id integer, target_id integer, directed boolean, has_reverse_cost boolean)
+  RETURNS SETOF bus.paths_result AS
+'$libdir/libpgcityways', 'shortest_paths'
+  LANGUAGE c IMMUTABLE STRICT
+COST 1 ROWS 1000;
 
 --==========================================================================================================================  
 CREATE OR REPLACE FUNCTION bus._get_prev_relation(_direct_route_id bigint,_prev_index bigint)
@@ -385,17 +392,17 @@ DECLARE
  _id                    integer;
 BEGIN
   FOR _id IN SELECT t1.path_id FROM
-	           (SELECT paths.path_id as path_id,count(*) as count FROM paths 
-	                   JOIN bus.route_relations ON bus.route_relations.id = paths.relation_id
+	           (SELECT paths.path_id as path_id,count(*) as count FROM temp_paths 
+	                   JOIN bus.route_relations ON bus.route_relations.id = temp_paths.relation_id
 	                   WHERE bus.route_relations.id <> _relation_input_id
-	                  GROUP BY paths.path_id,bus.route_relations.direct_route_id
+	                  GROUP BY temp_paths.path_id,bus.route_relations.direct_route_id
 	           ) as t1
 	           WHERE t1.count = 1
 	LOOP
            _id_arr:= array_append(_id_arr,_id);
 	END LOOP;
 
-  DELETE FROM paths where path_id = ANY(_id_arr);
+  DELETE FROM temp_paths where path_id = ANY(_id_arr);
 END;
 $BODY$
   LANGUAGE plpgsql VOLATILE
@@ -418,9 +425,306 @@ $BODY$
   LANGUAGE plpgsql VOLATILE
   COST 100;	
   
-  
 --===============================================================================================================
-CREATE OR REPLACE FUNCTION bus.find_shortest_paths(	_city_id  	bigint,
+  CREATE OR REPLACE FUNCTION bus.find_shortest_paths(	_city_id  	bigint,
+							_p1 		geography,
+							_p2 		geography,
+							_day_id 	bus.day_enum,
+							_time_start  	time,
+					        _max_distance 	double precision,
+					        _route_types 	text[],
+					        _discounts      double precision[],
+					        _alg_strategy   bus.alg_strategy,
+					        _lang_id        bus.lang_enum)
+RETURNS SETOF bus.way_elem AS
+$BODY$
+DECLARE
+ _foot_speed            double precision;
+ _nearest_relation      bus.nearest_relation%ROWTYPE;
+ relations_A 		    bus.nearest_relation[];
+ relations_B 		    bus.nearest_relation[];
+ query 			text;
+ i 			integer;
+ j 			integer;
+ k                      integer;
+ --count_i 		integer;
+ --count_j 		integer;
+ _relation_input_id     integer;  -- id of bus.route_relations row, which of route type is 'c_route_station_input'
+
+ _curr_filter_path	bus.filter_path%ROWTYPE;
+ _prev_filter_path	bus.filter_path;
+ _temp_filter_path	bus.filter_path;
+ _move_time             interval;
+ _distance              double precision;
+ _paths                 bus.filter_path[];
+ _way_elem              bus.way_elem%ROWTYPE;
+ _id_arr                integer[];
+ _id                    integer;
+ _start_id              integer;
+ _finish_id             integer;
+ _r                  record;
+BEGIN
+
+  -- Сохраним скорость движения пешехода (км/ч) в переменную  _foot_speed
+  _foot_speed := 5; -- default value
+  SELECT ev_speed INTO _foot_speed  FROM bus.transport_types  
+         WHERE id = bus.transport_type_enum('c_foot');
+  
+  
+ -- get _relation_input_id
+ /*_relation_input_id := bus._get_relation_input_id(_city_id);*/
+
+  -- создадим временную таблицу  use_routes(id,discount) используемых типов маршрутов и 
+  -- скидки по каждому в процентном эквиваленте(от 0 до 1)
+  CREATE TEMPORARY  TABLE temp_use_routes  ON COMMIT DROP AS
+    SELECT route_type as id,discount FROM 
+	(select row_number() over (ORDER BY (select 0)) as id, unnest::bus.route_type_enum as route_type from 
+		unnest( _route_types)
+	) as route_types
+    JOIN
+    ( select row_number() over (ORDER BY (select 0)) as id, unnest as discount from 
+                unnest( _discounts)
+    ) as discounts
+    ON discounts.id =  route_types.id;
+
+   
+ -- Зададим id начальной и конечной дуги
+ _start_id  := -10;
+ _finish_id := -11;
+ 
+ --SELECT max(id) INTO _start_id FROM bus._graph_relations;       
+ 
+ -- Найдем ближайшие дуги от начальной точки назначения и сохраним их во временную таблицу  nearest_relations
+ CREATE TEMPORARY  TABLE temp_nearest_relations  ON COMMIT DROP AS
+    (SELECT    -row_number() over (ORDER BY (select 0))-1 		      			as id,
+              _start_id           												as relation_a_id,
+              nr_table.id         												as relation_b_id,
+              bus.routes.route_type_id                                          as route_type_id,
+              bus.route_type_enum('c_route_station_input')						as relation_type,
+              bus.time_routes.freq	                    						as wait_time,
+			  (nr_table.distance/1000.0/_foot_speed*60) * interval '00:01:00'   as move_time,
+			  bus.routes.cost                                                   as cost_money,
+			  EXTRACT(EPOCH FROM (nr_table.distance/1000.0/_foot_speed*60) * 
+			  interval '00:01:00' + bus.time_routes.freq/2.0)                   as cost_time,
+			  nr_table.distance                                                 as distance
+		FROM bus.find_nearest_relations(_p1,
+				 _city_id,
+				 _max_distance) as nr_table
+		JOIN bus.route_relations ON bus.route_relations.id = nr_table.id
+		JOIN bus.direct_routes   ON bus.direct_routes.id = bus.route_relations.direct_route_id
+		JOIN bus.routes          ON bus.routes.id = bus.direct_routes.route_id
+		JOIN bus.time_routes     ON bus.time_routes.route_id = bus.routes.id
+     );
+     
+  -- Найдем ближайшие дуги до конечной точки назначения и сохраним их в таблицу nearest_relations
+  SELECT min(id) INTO i FROM temp_nearest_relations;  
+  INSERT INTO temp_nearest_relations(id,relation_a_id,relation_b_id,route_type_id,relation_type,wait_time,
+                                move_time,cost_money,cost_time,distance)
+  (SELECT    -row_number() over (ORDER BY (select 0)) +i     		           as id,
+             nr_table.id                                                       as relation_a_id,
+             _finish_id           										  	   as relation_b_id,
+             bus.route_type_enum('c_route_station_output')           		   as route_type_id,
+             bus.route_type_enum('c_route_station_output')			  		   as relation_type,
+             interval '00:00:00'                    						   as wait_time,
+			 (nr_table.distance/1000.0/_foot_speed*60) * interval '00:01:00'   as move_time,
+			 0.0		                                                       as cost_money,
+			 EXTRACT(EPOCH FROM (nr_table.distance/1000.0/_foot_speed*60) * 
+			 interval '00:01:00') 											   as cost_time,
+			 nr_table.distance                                                 as distance
+		FROM bus.find_nearest_relations(_p2,
+				 _city_id,
+				 _max_distance) as nr_table
+     );
+    
+  
+   
+  -- Составим query графа
+  IF _alg_strategy = bus.alg_strategy('c_time') THEN
+    query := 'select 0;';
+  ELSEIF _alg_strategy = bus.alg_strategy('c_cost') THEN
+  	query := '(SELECT bus._graph_relations.id         as id,'     ||
+  	         '        relation_a_id                  as source,' ||
+  	         '        relation_b_id                  as target,' || 
+  	         '        temp_use_routes.discount*cost_money as cost '   ||
+  	         ' FROM bus._graph_relations '                       ||
+  	         ' LEFT JOIN temp_use_routes ON temp_use_routes.id = bus._graph_relations.route_type_id' ||
+  	         '  where city_id = ' ||  _city_id                      ||
+  	         ')UNION ALL'                                        ||
+  	         '(SELECT temp_nearest_relations.id           as id,'     ||
+  	         '        relation_a_id                  as source,' ||
+  	         '        relation_b_id                  as target,' || 
+  	         '        temp_use_routes.discount*cost_money as cost '   ||
+  	         ' FROM temp_nearest_relations '                          ||
+  	         ' JOIN temp_use_routes ON temp_use_routes.id = temp_nearest_relations.route_type_id' ||
+  	         ')';
+  ELSE
+    query := 'select 0;';
+   END IF;	
+   i:=1;
+   
+   /*FOR _r IN EXECUTE query
+   LOOP
+     RAISE  NOTICE 'output data: %',_r; 
+     i := i + 1;
+   END LOOP;
+    RAISE  NOTICE 'count(i): %',i; */
+  -- Создадим временную таблицу paths, в которую сохраним найденные пути
+  CREATE TEMPORARY TABLE temp_paths
+  (
+     path_id     integer, -- id пути
+     index       integer, -- индекс дуги
+     relation_id integer, -- id дуги из таблицы bus.route_relations
+     graph_id    bigint   -- id дуги из таблицы bus._graph_relations
+  )ON COMMIT DROP;
+  
+ /* RAISE NOTICE 'paths:';
+  FOR _r IN select *
+		   from bus.lib_shortest_paths(query,_start_id,_finish_id,true,false) as t1
+  LOOP
+    RAISE NOTICE '%',_r;
+  END LOOP;
+  RAISE NOTICE 'paths end.';*/
+  -- Найдем кратчайший путь
+  BEGIN
+     INSERT INTO temp_paths(path_id,index,relation_id,graph_id)
+		   select t1.path_id                                 as path_id,
+                  row_number() over (ORDER BY (select 0)) as index,
+		          t1.vertex_id                            as relation_id,
+		          t1.edge_id                              as graph_id
+		   from bus.lib_shortest_paths(query,_start_id,_finish_id,true,false) as t1;
+ -- EXCEPTION  WHEN OTHERS THEN 
+    
+  END;
+ -- Сохраним в _paths только нужную  инфу о маршрутах
+ _prev_filter_path := null;
+ FOR _curr_filter_path IN 
+        SELECT 
+		temp_paths.path_id                                         as path_id,
+		temp_paths.graph_id										  as graph_id,
+		temp_paths.index                                           as index,
+		temp_paths.relation_id                                     as relation_id,
+		bus.route_relations.direct_route_id                   as direct_route_id,
+		bus.route_relations.position_index                    as relation_index,
+		bus.route_relations.station_b_id                      as station_id,
+		graph_relations.relation_type                         as route_type,
+		graph_relations.move_time                             as move_time,
+		(graph_relations.cost_money*temp_use_routes.discount) as cost,
+		graph_relations.distance                              as distance
+	    FROM temp_paths 
+        LEFT JOIN bus.route_relations                  	     ON bus.route_relations.id = temp_paths.relation_id
+	    LEFT JOIN ( (SELECT id,relation_type,move_time,cost_money,distance,route_type_id FROM bus._graph_relations) 
+	                 UNION ALL 
+	                (SELECT id,relation_type,move_time,cost_money,distance,route_type_id FROM temp_nearest_relations)) as graph_relations 
+	         ON graph_relations.id = temp_paths.graph_id
+	    LEFT JOIN temp_use_routes                                 ON temp_use_routes.id = graph_relations.route_type_id 
+	ORDER BY temp_paths.path_id,temp_paths.index
+  LOOP
+     -- Если текущий путь не меняется, 
+     IF _curr_filter_path.relation_id = _start_id THEN
+			--RAISE  NOTICE 'start path: %',_curr_filter_path; 
+     		/*SELECT distance,move_time,cost_money INTO 
+     		       _curr_filter_path.distance,_curr_filter_path.move_time,_curr_filter_path.cost
+              FROM nearest_relations WHERE id = _curr_filter_path.graph_id;*/
+			
+     ELSEIF _curr_filter_path.relation_id = _finish_id THEN
+			--RAISE  NOTICE 'finish path: %',_curr_filter_path; 
+			_temp_filter_path:= null;
+			/*SELECT distance,move_time INTO _temp_filter_path.distance,_temp_filter_path.move_time
+              FROM nearest_relations WHERE id = _prev_filter_path.graph_id;*/
+             _temp_filter_path.distance  := _prev_filter_path.distance;
+             _temp_filter_path.move_time := _prev_filter_path.move_time;
+			_temp_filter_path.route_type :=  bus.route_type_enum('c_route_station_output');
+			_temp_filter_path.index      := 10000;
+			_temp_filter_path.path_id    := _prev_filter_path.path_id;
+			_paths:= array_append(_paths,_temp_filter_path);
+
+     ELSEIF _curr_filter_path.direct_route_id <> _prev_filter_path.direct_route_id OR
+            _prev_filter_path.direct_route_id IS NULL THEN 
+			-- RAISE  NOTICE 'path: %',_curr_filter_path; 
+			
+			-- Добавим данные о начале  текущего маршрута
+			_temp_filter_path           := _curr_filter_path;
+			_temp_filter_path.move_time := _prev_filter_path.move_time;
+			_temp_filter_path.cost      := _prev_filter_path.cost;
+			_temp_filter_path.distance  := _prev_filter_path.distance;
+			_paths:= array_append(_paths,_temp_filter_path);
+             -- Обнулим накапливающие переменные времени передвижения и длины текущего маршрута
+			_move_time := _curr_filter_path.move_time;
+			_distance  := _curr_filter_path.distance;
+     ELSEIF _curr_filter_path.graph_id <= 0 OR 
+            _curr_filter_path.route_type = bus.route_type_enum('c_route_transition') THEN
+            --RAISE  NOTICE 'path: %',_curr_filter_path; 
+            -- Добавим данные о конце  текущего маршрута
+			_temp_filter_path           := _curr_filter_path;
+            _temp_filter_path.move_time := _move_time;
+            _temp_filter_path.cost      := null;
+            _temp_filter_path.distance  := _distance;
+            _paths :=  array_append(_paths,_temp_filter_path);
+	 ELSE
+			--RAISE  NOTICE 'path: %',_curr_filter_path; 
+			_move_time := _move_time + _curr_filter_path.move_time;
+			_distance  := _distance + _curr_filter_path.distance;
+     
+     END IF;
+     _prev_filter_path := _curr_filter_path;
+   END LOOP;
+  
+ -- return data
+ FOR _way_elem IN 
+        SELECT 
+		paths.path_id  			        as path_id,
+		paths.index 			        as index,
+		bus.direct_routes.id 		    as direct_route_id,
+		bus.routes.route_type_id 	    as route_type,  
+		paths.relation_index            as relation_index,
+		text(bus.routes.number) || bus.get_string_without_null(route_names.value)     as route_name,
+		station_names.value              as station_name, 
+		paths.move_time                  as move_time,
+		interval '00:00:00'              as wait_time,
+		paths.cost                       as cost,
+		paths.distance                   as distance
+        FROM unnest(_paths) as paths
+        LEFT JOIN bus.direct_routes                    	     ON bus.direct_routes.id = paths.direct_route_id
+	    LEFT JOIN bus.routes                                 ON bus.routes.id = bus.direct_routes.route_id
+        LEFT JOIN bus.string_values as route_names           ON route_names.key_id = bus.routes.name_key  
+        LEFT JOIN bus.stations                               ON bus.stations.id = paths.station_id
+        LEFT JOIN bus.string_values as station_names	     ON station_names.key_id = bus.stations.name_key  
+        
+        WHERE (route_names.lang_id = _lang_id or route_names.lang_id IS NULL) AND
+              (station_names.lang_id = _lang_id or station_names.lang_id IS NULL)
+  LOOP
+         RETURN NEXT _way_elem;
+   END LOOP; 
+
+END;
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;		
+
+--===============================================================================================================
+  /*
+  select  * from  bus.find_shortest_path(bus.get_city_id(bus.lang_enum('c_ru'),'Харьков'),
+				 st_geographyfromtext('POINT(50.026350246659 36.3360857963562)'),
+				 st_geographyfromtext('POINT(50.0046342324976 36.234312426768)'),
+				 bus.day_enum('c_Monday'),
+				 time  '10:00:00',
+				 500,
+				 ARRAY['c_route_station_input',
+					   'c_route_station_output'
+				       'c_route_transition',
+				       'c_route_trolley',
+				       'c_route_metro',
+				       'c_route_bus'],
+				 ARRAY[1,
+				       1,
+				       1,
+				       0.5,
+				       1],
+				 bus.alg_strategy('c_cost'),
+				 bus.lang_enum('c_ru')) ORDER BY path_id,index; 
+  
+  */
+CREATE OR REPLACE FUNCTION bus.find_shortest_path(	_city_id  	bigint,
 							_p1 		geography,
 							_p2 		geography,
 							_day_id 	bus.day_enum,
@@ -465,10 +769,6 @@ BEGIN
   SELECT ev_speed INTO _foot_speed  FROM bus.transport_types  
          WHERE id = bus.transport_type_enum('c_foot');
   
-  
- -- get _relation_input_id
- /*_relation_input_id := bus._get_relation_input_id(_city_id);*/
-
   -- создадим временную таблицу  use_routes(id,discount) используемых типов маршрутов и 
   -- скидки по каждому в процентном эквиваленте(от 0 до 1)
   CREATE TEMPORARY  TABLE use_routes  ON COMMIT DROP AS
@@ -486,8 +786,7 @@ BEGIN
  -- Зададим id начальной и конечной дуги
  _start_id  := -10;
  _finish_id := -11;
- 
- --SELECT max(id) INTO _start_id FROM bus._graph_relations;       
+     
  
  -- Найдем ближайшие дуги от начальной точки назначения и сохраним их во временную таблицу  nearest_relations
  CREATE TEMPORARY  TABLE nearest_relations  ON COMMIT DROP AS
@@ -530,8 +829,6 @@ BEGIN
 				 _city_id,
 				 _max_distance) as nr_table
      );
-    
-  
    
   -- Составим query графа
   IF _alg_strategy = bus.alg_strategy('c_time') THEN
@@ -557,12 +854,6 @@ BEGIN
    END IF;	
    i:=1;
    
-   /*FOR _r IN EXECUTE query
-   LOOP
-     RAISE  NOTICE 'output data: %',_r; 
-     i := i + 1;
-   END LOOP;
-    RAISE  NOTICE 'count(i): %',i; */
   -- Создадим временную таблицу paths, в которую сохраним найденные пути
   CREATE TEMPORARY TABLE paths
   (
@@ -574,7 +865,7 @@ BEGIN
   
   _curr_path_id:= 1; -- текущий индекс маршрута
   
-  -- Найдем кратчайшие пути
+  -- Найдем кратчайший путь
   WHILE _curr_path_id < 2 LOOP
   BEGIN
      INSERT INTO paths(path_id,index,relation_id,graph_id)
@@ -584,8 +875,7 @@ BEGIN
 		          t1.edge_id                              as graph_id
 		   from shortest_path(query,_start_id,_finish_id,true,false) as t1;
   EXCEPTION  WHEN OTHERS THEN 
-						--RAISE  NOTICE 'warning in shortest_path';
-						--_curr_path := _curr_path - 1;
+    
   END;
   _curr_path_id:= _curr_path_id + 1;
  END LOOP;
@@ -615,17 +905,10 @@ BEGIN
   LOOP
      -- Если текущий путь не меняется, 
      IF _curr_filter_path.relation_id = _start_id THEN
-			--RAISE  NOTICE 'start path: %',_curr_filter_path; 
-     		/*SELECT distance,move_time,cost_money INTO 
-     		       _curr_filter_path.distance,_curr_filter_path.move_time,_curr_filter_path.cost
-              FROM nearest_relations WHERE id = _curr_filter_path.graph_id;*/
 			
      ELSEIF _curr_filter_path.relation_id = _finish_id THEN
-			RAISE  NOTICE 'finish path: %',_curr_filter_path; 
 			_temp_filter_path:= null;
-			/*SELECT distance,move_time INTO _temp_filter_path.distance,_temp_filter_path.move_time
-              FROM nearest_relations WHERE id = _prev_filter_path.graph_id;*/
-             _temp_filter_path.distance  := _prev_filter_path.distance;
+	         _temp_filter_path.distance  := _prev_filter_path.distance;
              _temp_filter_path.move_time := _prev_filter_path.move_time;
 			_temp_filter_path.route_type :=  bus.route_type_enum('c_route_station_output');
 			_temp_filter_path.index      := 10000;
@@ -634,21 +917,18 @@ BEGIN
 
      ELSEIF _curr_filter_path.direct_route_id <> _prev_filter_path.direct_route_id OR
             _prev_filter_path.direct_route_id IS NULL THEN 
-			-- RAISE  NOTICE 'path: %',_curr_filter_path; 
 			
 			-- Добавим данные о начале  текущего маршрута
 			_temp_filter_path           := _curr_filter_path;
 			_temp_filter_path.move_time := _prev_filter_path.move_time;
 			_temp_filter_path.cost      := _prev_filter_path.cost;
 			_temp_filter_path.distance  := _prev_filter_path.distance;
-			RAISE  NOTICE '_temp_filter_path: %',_prev_filter_path; 
 			_paths:= array_append(_paths,_temp_filter_path);
              -- Обнулим накапливающие переменные времени передвижения и длины текущего маршрута
 			_move_time := _curr_filter_path.move_time;
 			_distance  := _curr_filter_path.distance;
      ELSEIF _curr_filter_path.graph_id <= 0 OR 
             _curr_filter_path.route_type = bus.route_type_enum('c_route_transition') THEN
-            --RAISE  NOTICE 'path: %',_curr_filter_path; 
             -- Добавим данные о конце  текущего маршрута
 			_temp_filter_path           := _curr_filter_path;
             _temp_filter_path.move_time := _move_time;
@@ -656,7 +936,6 @@ BEGIN
             _temp_filter_path.distance  := _distance;
             _paths :=  array_append(_paths,_temp_filter_path);
 	 ELSE
-			--RAISE  NOTICE 'path: %',_curr_filter_path; 
 			_move_time := _move_time + _curr_filter_path.move_time;
 			_distance  := _distance + _curr_filter_path.distance;
      
@@ -664,12 +943,6 @@ BEGIN
      _prev_filter_path := _curr_filter_path;
    END LOOP;
   
-  -- Debug Out 
-   /*FOR _r IN SELECT * FROM unnest(_paths) as paths
-   LOOP
-     RAISE  NOTICE 'output data: %',_r; 
-   END LOOP;
-   */
  -- return data
  FOR _way_elem IN 
         SELECT 
@@ -697,288 +970,6 @@ BEGIN
          RETURN NEXT _way_elem;
    END LOOP; 
 
-END;
-$BODY$
-  LANGUAGE plpgsql VOLATILE
-  COST 100;		
-
---===============================================================================================================
---===============================================================================================================
-  /*
-  select  * from  bus.shortest_ways(bus.get_city_id(bus.lang_enum('c_ru'),'Харьков'),
-				 st_geographyfromtext('POINT(50.026350246659 36.3360857963562)'),
-				 st_geographyfromtext('POINT(50.0046342324976 36.234312426768)'),
-				 bus.day_enum('c_Monday'),
-				 time  '10:00:00',
-				 500,
-				 ARRAY['c_route_station_input',
-				       'c_route_transition',
-				       'c_route_trolley',
-				       'c_route_metro',
-				       'c_route_bus'],
-				 ARRAY[1,
-				       1,
-				       1,
-				       0.5,
-				       1],
-				 bus.alg_strategy('c_cost'),
-				 bus.lang_enum('c_ru')) ORDER BY path_id,index; 
-  
-  */
-CREATE OR REPLACE FUNCTION bus.shortest_ways(	_city_id  	bigint,
-						_p1 		geography,
-						_p2 		geography,
-						_day_id 	bus.day_enum,
-						_time_start  	time,
-					        _max_distance 	double precision,
-					        _route_types 	text[],
-					        _discounts      double precision[],
-					        _alg_strategy   bus.alg_strategy,
-					        _lang_id        bus.lang_enum)
-RETURNS SETOF bus.way_elem AS
-$BODY$
-DECLARE
- _foot_speed            double precision;
- _nearest_relation      bus.nearest_relation%ROWTYPE;
- relations_A 		    bus.nearest_relation[];
- relations_B 		    bus.nearest_relation[];
- query 			text;
- i 			integer;
- j 			integer;
- k                      integer;
- count_i 		integer;
- count_j 		integer;
- _curr_path             integer;
- _relation_input_id     integer;  -- id of bus.route_relations row, which of route type is 'c_route_station_input'
-
- _curr_filter_path	bus.filter_path%ROWTYPE;
- _prev_filter_path	bus.filter_path%ROWTYPE;
- _temp_filter_path	bus.filter_path%ROWTYPE;
- _move_time             interval;
- _distance              double precision;
- _paths                 bus.filter_path[];
- _way_elem              bus.way_elem%ROWTYPE;
- _id_arr                integer[];
- _id                    integer;
-BEGIN
-
-  _foot_speed := 5; -- default value
-  SELECT ev_speed INTO _foot_speed  FROM bus.transport_types  
-         WHERE id = bus.transport_type_enum('c_foot');
-         
- -- get _relation_input_id
- _relation_input_id := bus._get_relation_input_id(_city_id);
-
- -- get start end finish relations(stations)
- FOR _nearest_relation IN select * FROM bus.find_nearest_relations(_p1,
-				 _city_id,
-				 _max_distance)
- LOOP
-       relations_A := array_append(relations_A,_nearest_relation);
- END LOOP;
-
- FOR _nearest_relation IN select * FROM bus.find_nearest_relations(_p2,
-				 _city_id,
-				 _max_distance)
-  LOOP
-       relations_B := array_append(relations_B,_nearest_relation);
-   END LOOP;
-  
-  CREATE TEMPORARY  TABLE use_routes  ON COMMIT DROP AS
-  select route_type as id,discount from 
-	( select row_number() over (ORDER BY (select 0)) as id, unnest::bus.route_type_enum as route_type from 
-		unnest( _route_types)) as route_types
-        JOIN
-        ( select row_number() over (ORDER BY (select 0)) as id, unnest as discount from 
-                unnest( _discounts)) as discounts
-        ON discounts.id =  route_types.id;
-
-  
-  IF _alg_strategy = bus.alg_strategy('c_time') THEN
-	CREATE TEMPORARY TABLE graph ON COMMIT DROP AS
-	select bus._graph_relations.id as id,
-	       relation_a_id          as source,
-	       relation_b_id          as target, 
-	       cost_time              as cost 
-	       from bus._graph_relations 
-	       JOIN use_routes ON use_routes.id = bus._graph_relations.relation_type 
-	       where city_id = _city_id ;
-
-  ELSEIF _alg_strategy = bus.alg_strategy('c_cost') THEN
-  
-	CREATE TEMPORARY TABLE graph ON COMMIT DROP AS
-	select bus._graph_relations.id, relation_a_id as source,relation_b_id as target, use_routes.discount*cost_money as cost 
-	       from bus._graph_relations 
-	       JOIN use_routes ON use_routes.id = bus._graph_relations.relation_type 
-	       where city_id = _city_id;
-  ELSE
-        CREATE TEMPORARY TABLE graph ON COMMIT DROP AS
-	select bus._graph_relations.id, 
-	       relation_a_id as source,
-	       relation_b_id as target, 
-	       (30*bus._graph_relations.cost + cost_time) as cost
-	       from bus._graph_relations 
-	       JOIN use_routes ON use_routes.id = bus._graph_relations.route_type_id 
-	       where city_id = _city_id;
-  END IF;
-
-
-
-  
-  CREATE TEMPORARY TABLE paths
-  (
-     path_id     integer,
-     index       integer,
-     relation_id integer,
-     graph_id    bigint
-  )ON COMMIT DROP;
-
-  
- 
-  count_i := array_upper(relations_A,1);
-  count_j := array_upper(relations_B,1);
-   i:=1;
-  _curr_path := 1;
-  
-  WHILE i<= count_i AND _curr_path<=2 LOOP
-        j := 1;
-        WHILE j<= count_j AND _curr_path<=2 LOOP
-	   query:='select * from graph where source<>'||_relation_input_id||' OR (source = '
-	          ||_relation_input_id||' and target = '||relations_A[i].id||')';
-
-	       -- RAISE NOTICE '%',relations_A[i];
-           -- RAISE NOTICE '%',relations_B[j];
-           -- RAISE NOTICE '%',query;
-           k:=0;
-           WHILE k < 1 LOOP
-			BEGIN
-
-                INSERT INTO paths(path_id,index,relation_id,graph_id)
-		              select _curr_path as path_id,
-                          row_number() over (ORDER BY (select 0)) as index,
-						t1.vertex_id as  relation_id,
-						t1.edge_id   as graph_id
-					from shortest_path(query,_relation_input_id,relations_B[j].id,true,false) as t1;
-		
-					INSERT INTO paths(path_id,index) VALUES(_curr_path,10000);
-					
-					EXCEPTION  WHEN OTHERS THEN 
-						--RAISE  NOTICE 'warning in shortest_path';
-						_curr_path := _curr_path - 1;
-			 END;
-			 _curr_path := _curr_path + 1;
-             k := k+1;
-           END LOOP;
-	   j := j + 1;
-        END LOOP;
-	i := i + 1;
-  END LOOP;
- 
- select count(*) INTO count_i from  graph ;
- RAISE  NOTICE 'count: %',count_i; 
- 
- select count(*) INTO count_i from  paths ;
- RAISE  NOTICE 'count: %',count_i; 
-
- --delete bad ways from paths table
- EXECUTE bus.__clean_paths_table(_relation_input_id);
-
- _prev_filter_path := null;
- FOR _curr_filter_path IN 
-        SELECT 
-		paths.path_id                                        as path_id,
-		paths.graph_id                                       as graph_id,
-		paths.index                                          as index,
-		bus.route_relations.id                               as relation_id,
-		bus.route_relations.direct_route_id                  as direct_route_id,
-		bus.route_relations.position_index                   as relation_index,
-		bus.route_relations.station_b_id                     as station_id,
-		bus._graph_relations.relation_type                    as route_type,
-		bus._graph_relations.move_time                        as move_time,
-		bus._graph_relations.cost_money*use_routes.discount   as cost,
-		bus._graph_relations.distance                         as distance
-		
-        FROM paths 
-        LEFT JOIN bus.route_relations                  	     ON bus.route_relations.id = paths.relation_id
-	LEFT JOIN bus._graph_relations                  	     ON bus._graph_relations.id = paths.graph_id
-	LEFT JOIN use_routes                                 ON use_routes.id = bus._graph_relations.route_type_id 
-	ORDER BY paths.path_id,paths.index
-  LOOP
-     -- _paths:= array_append(_paths,_curr_filter_path);
-    
-       IF  _curr_filter_path.path_id = _prev_filter_path.path_id 
-          AND _curr_filter_path.direct_route_id <> _prev_filter_path.direct_route_id THEN
-             _temp_filter_path           := _curr_filter_path;
-             --_temp_filter_path.wait_time := interval '1 hour';
-             _temp_filter_path.cost      := _prev_filter_path.cost;
-             
-             IF _prev_filter_path.route_type = bus.route_type_enum('c_route_station_input') THEN
-               select relations.distance into _temp_filter_path.distance FROM unnest(relations_A) as relations 
-			where relations.id = _curr_filter_path.relation_id;
-               _temp_filter_path.move_time := _temp_filter_path.distance/1000.0/_foot_speed * interval '1 hour';
-               
-             ELSE
-	        _temp_filter_path.move_time := _prev_filter_path.move_time;
-	        _temp_filter_path.distance  := _prev_filter_path.distance;
-	     END IF;
-             _paths:= array_append(_paths,_temp_filter_path);
-             IF _prev_filter_path.relation_id <> _relation_input_id THEN
-               _temp_filter_path           := _prev_filter_path;
-               _temp_filter_path.move_time := _move_time;
-               _temp_filter_path.cost      := null;
-               --_temp_filter_path.wait_time := null;
-               _temp_filter_path.distance  := _distance;
-               _paths :=  array_append(_paths,_temp_filter_path);
-             END IF;
-             _move_time := interval '00:00:00';
-             _distance  := 0.0;
-       ELSEIF _curr_filter_path.path_id = _prev_filter_path.path_id AND  _prev_filter_path.move_time IS NOT NULL THEN
-             _move_time := _move_time + _prev_filter_path.move_time;
-             _distance  := _distance + _prev_filter_path.distance;
-       END IF;
-
-       
-       IF _prev_filter_path.path_id = _curr_filter_path.path_id AND
-          _curr_filter_path.index = 10000  THEN
-	    _prev_filter_path.move_time := _move_time;
-	    _prev_filter_path.distance := _distance;
-	    _paths:= array_append(_paths,_prev_filter_path);
-	    select relations.distance into _curr_filter_path.distance FROM unnest(relations_B) as relations 
-                  where relations.id = _prev_filter_path.relation_id;
-            _curr_filter_path.move_time := _curr_filter_path.distance/1000.0/_foot_speed * interval '1 hour';
-            _paths:= array_append(_paths,_curr_filter_path);	
-       END IF;
-       _prev_filter_path := _curr_filter_path;
-   END LOOP;
-
- -- return data
-   
- FOR _way_elem IN 
-        SELECT 
-		paths.path_id  			        as path_id,
-		paths.index 			        as index,
-		bus.direct_routes.id 		    as direct_route_id,
-		bus.routes.route_type_id 	    as route_type,  
-		paths.relation_index            as relation_index,
-		text(bus.routes.number) || bus.get_string_without_null(route_names.value)     as route_name,
-		station_names.value              as station_name, 
-		paths.move_time                  as move_time,
-		interval '00:00:00'                  as wait_time,
-		paths.cost                       as cost,
-		paths.distance                   as distance
-        FROM unnest(_paths) as paths
-        LEFT JOIN bus.direct_routes                    	     ON bus.direct_routes.id = paths.direct_route_id
-	LEFT JOIN bus.routes                                 ON bus.routes.id = bus.direct_routes.route_id
-        LEFT JOIN bus.string_values as route_names           ON route_names.key_id = bus.routes.name_key  
-        LEFT JOIN bus.stations                               ON bus.stations.id = paths.station_id
-        LEFT JOIN bus.string_values as station_names	     ON station_names.key_id = bus.stations.name_key  
-        
-        WHERE (route_names.lang_id = _lang_id or route_names.lang_id IS NULL) AND
-              (station_names.lang_id = _lang_id or station_names.lang_id IS NULL)
-  LOOP
-         RETURN NEXT _way_elem;
-   END LOOP;
-	 
 END;
 $BODY$
   LANGUAGE plpgsql VOLATILE

@@ -101,11 +101,20 @@ CREATE TYPE bus.way_elem AS
 
 CREATE TYPE bus.path_elem AS
 (
- path_id     integer,
+     path_id     integer,
      index       integer,
      relation_id integer,
      graph_id    bigint
 );
+
+CREATE TYPE bus.paths_result AS
+(
+     path_id     integer,
+     vertex_id   integer,
+     edge_id     integer
+);
+
+
 
 -- create views
 CREATE OR REPLACE VIEW bus.time_routes AS 
