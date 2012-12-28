@@ -6,14 +6,14 @@ using namespace std;
 
 class Path
 {
-
  vector<int>  vertexes;
 public:
     Path(vector<int>  vertexes);
-    vector<int> getVertexes();
+    vector<int>& getVertexes();
     int getVertexesCount(){
         return this->vertexes.size();
     }
+    const char* toString();
 };
 
 #endif // PATH_H

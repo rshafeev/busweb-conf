@@ -29,5 +29,10 @@ typedef struct paths_element
     int edge_id;
 } paths_element_t;
 
+typedef struct paths
+{
+   paths_element_t* arr;
+   int count;
+} paths_t;
 
 #endif // TYPES_H

@@ -50,7 +50,7 @@ TPatchsResult DijkstraPathFinder::findShortestPaths(int startVertexID, int endVe
     graph_t &graph = *this->graph.getGraphObj().get();
     vertex_descriptor _source = vertex(startVertexID, graph);
 
-    if (_source <= 0 /*|| _source >= num_nodes*/)
+    if (_source < 0 /*|| _source >= num_nodes*/)
     {
         result.err_msg = (char *) "Starting vertex not found";
         result.result_code = -1;
@@ -58,9 +58,9 @@ TPatchsResult DijkstraPathFinder::findShortestPaths(int startVertexID, int endVe
     }
 
     vertex_descriptor _target = vertex(endVertexID, graph);
-    if (_target <= 0 /*|| _target >= num_nodes*/)
+    if (_target < 0 /*|| _target >= num_nodes*/)
     {
-        result.err_msg = (char *) "Ending vertex not found";
+        result.err_msg = (char *) "Ending the vertex not found";
         result.result_code = -1;
         return result;
     }

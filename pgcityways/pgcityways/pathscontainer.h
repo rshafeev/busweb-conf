@@ -14,9 +14,7 @@ public:
     PathsContainer();
     ~PathsContainer();
 
-    void addPath(std::shared_ptr<Path> path){
-        this->paths.push_back(path);
-    }
+    void addPath(std::shared_ptr<Path> path);
     int getPathsCount(){
         return paths.size();
     }
@@ -39,6 +37,8 @@ public:
         }
         return count;
     }
+
+
 
 };
 

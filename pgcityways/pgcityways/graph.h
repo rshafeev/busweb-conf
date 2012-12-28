@@ -20,6 +20,10 @@ typedef graph_traits < graph_t >::vertex_descriptor vertex_descriptor;
 typedef graph_traits < graph_t >::edge_descriptor edge_descriptor;
 typedef std::pair<int, int> Edge;
 
+/**
+ * Класс- граф. Ограничения: (не может иметь парных дуг, возможны ошибки)
+ * @brief The Graph class
+ */
 class Graph
 {
     std::shared_ptr<GraphData> data;
@@ -27,8 +31,20 @@ class Graph
 public:
     Graph(std::shared_ptr<GraphData> data);
 
-    std::shared_ptr<std::vector<paths_element> > getDBPathsTable(PathsContainer &paths);
+    paths_t getDBPathsTable(PathsContainer &paths);
     std::shared_ptr<graph_t> getGraphObj();
+
+    /**
+     * @brief removeEdge Врзвращает дугу между вдумя вершинами
+     * @param sourceV Начальный узел
+     * @param targetV Конечный узел
+     * @return дуга ли nullptr. Структура заполняется не полностью, только id и cost
+     */
+    bool getEdge(edge_t& edge);
+    std::shared_ptr<edge_t> getEdge(int &sourceV, int &targetV);
+    void   removeEdge(int &sourceV, int &targetV);
+    void   addEdge(edge_t & e);
+    int   getNumEdges();
 
 };
 

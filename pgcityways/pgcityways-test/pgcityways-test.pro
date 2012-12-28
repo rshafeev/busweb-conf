@@ -28,10 +28,15 @@ else {
 
 INCLUDEPATH+=../pgcityways
 INCLUDEPATH+=../pgcityways/db
+
 SOURCES +=  ../pgcityways/*.cpp \
-    testgraphdataloader.cpp
+    helpers/TestGraphDataLoader.cpp \
+    DijkstraPathFinderTest.cpp \
+    GraphTest.cpp \
+    PgCityWaysTest.cpp
+
 HEADERS +=  ../pgcityways/*.h \
-    testgraphdataloader.h
+    helpers/TestGraphDataLoader.h
 HEADERS +=  ../pgcityways/db/*.h
 
 #QMAKE_CXXFLAGS += -std=c++0x
@@ -47,8 +52,6 @@ INCLUDEPATH +=/usr/include/postgresql/9.2/server
 QMAKE_CXXFLAGS += -std=c++0x
 # UNIT TESTS
 SOURCES += \
-    main.cpp \
-    graphtest.h \
-    tst_pgcitywaystest.h
+    main.cpp
 
-
+QMAKE_EXTRA_COMPILERS += new_moc
