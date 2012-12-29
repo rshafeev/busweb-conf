@@ -45,7 +45,7 @@ public:
     void   removeEdge(int &sourceV, int &targetV);
     void   addEdge(edge_t & e);
     int   getNumEdges();
-
+    double getPathCost(std::shared_ptr<Path> path);
 };
 
 #endif // GRAPH_H

@@ -75,7 +75,21 @@ bool Graph::getEdge(edge_t& edge){
     return false;
 
 }
-
+double Graph::getPathCost(std::shared_ptr<Path> path){
+    double cost = 0.0;
+    if(path.get() == nullptr)
+        return -1;
+    std::vector<int>& path_vect = path->getVertexes();
+    for(int i=1; i < path_vect.size(); i++){
+        edge_t e ;
+        e.source = path_vect.at(i);
+        e.target = path_vect.at(i - 1);
+        // Найдем дугу между ними
+        this->getEdge(e);
+        cost += e.cost;
+    }
+    return cost;
+}
 
 std::shared_ptr<edge_t> Graph::getEdge(int &sourceV, int &targetV){
     graph_t& g = *this->graph.get();
@@ -105,15 +119,16 @@ std::shared_ptr<edge_t> Graph::getEdge(int &sourceV, int &targetV){
 }
 
 paths_t Graph::getDBPathsTable(PathsContainer &paths){
-     paths_t result;
-     result.count = (paths.getElementsCount() + paths.getPathsCount());
+    paths_t result;
+    result.count = (paths.getElementsCount() + paths.getPathsCount());
 
-     if(result.count <= 0){
-         result.arr = nullptr;
-         return result;
-     }
+    if(result.count <= 0){
+        result.arr = nullptr;
+        result.count = 0;
+        return result;
+    }
 
-     paths_element *arr = new paths_element[result.count];
+    paths_element *arr = new paths_element[result.count];
     int j = 0;
     edge_t edge;
     for(int k=0; k < paths.getPathsCount(); k++){
@@ -130,13 +145,14 @@ paths_t Graph::getDBPathsTable(PathsContainer &paths){
             edge.source = path_vect.at(i);
             edge.target = path_vect.at(i-1);
             if(this->getEdge(edge)==true){
-                 arr[j].edge_id = edge.id;
+                arr[j].edge_id = edge.id;
             }
 
         }
     }
 
     result.arr = arr;
+    result.count = j;
     return result;
 }
 

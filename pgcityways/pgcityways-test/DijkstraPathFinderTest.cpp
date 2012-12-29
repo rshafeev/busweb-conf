@@ -126,6 +126,32 @@ private Q_SLOTS:
         // check result
         QVERIFY(result.paths.getPathsCount()==0);
         QCOMPARE(result.result_code,-1);
+
+        // create data base row data
+        paths_t  dbSet = graph.getDBPathsTable(result.paths);
+        QVERIFY(dbSet.count==0);
+        cout << "edges count:" << dbSet.count << "\n";
+        // clean memory
+        delete finder;
+        delete[] dbSet.arr;
+    }
+
+    void FoundOnlyOnePathTest(){
+        // prepare setup info
+        int source = 5;
+        int target = 6;
+
+        // build graph
+
+        Graph graph(graphData);
+
+        // find shortest paths
+        IPathFinder *finder = new DijkstraPathFinder(graph);
+        TPatchsResult result = finder->findShortestPaths(source,target);
+
+        // check result
+        QVERIFY(result.paths.getPathsCount()==1);
+
         for(int i=0;i < result.paths.getPathsCount(); i++){
             std::shared_ptr<Path> path = result.paths.getPath(i);
             QCOMPARE(path->getVertexes().at(0),target);
@@ -135,8 +161,6 @@ private Q_SLOTS:
 
         // create data base row data
         paths_t  dbSet = graph.getDBPathsTable(result.paths);
-        QVERIFY(dbSet.count==0);
-        cout << "edges count:" << dbSet.count << "\n";
         // clean memory
         delete finder;
         delete[] dbSet.arr;

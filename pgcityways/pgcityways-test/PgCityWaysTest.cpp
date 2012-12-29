@@ -46,7 +46,10 @@ private Q_SLOTS:
                                    &paths,
                                    &paths_count,
                                    &err_msg);
-
+       cout << "\n";
+       for(int i=0;i < paths_count ; i++ ){
+           cout << paths[i].path_id << " " << paths[i].edge_id << " " << paths[i].vertex_id << "\n";
+       }
        if(paths_count>0)
        {
            delete[] paths;

@@ -8,6 +8,7 @@ class Path
 {
  vector<int>  vertexes;
 public:
+ Path();
     Path(vector<int>  vertexes);
     vector<int>& getVertexes();
     int getVertexesCount(){
