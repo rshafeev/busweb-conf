@@ -15,7 +15,8 @@ SOURCES += \
     path.cpp \
     pathscontainer.cpp \
     geopoint.cpp\
-    graphdata.cpp
+    graphdata.cpp \
+    testlogger.cpp
 
 
 HEADERS += \
@@ -27,7 +28,8 @@ HEADERS += \
     path.h \
     pathscontainer.h \
     geopoint.h \
-    graphdata.h
+    graphdata.h \
+    testlogger.h
 
 
 #BOOST LIB

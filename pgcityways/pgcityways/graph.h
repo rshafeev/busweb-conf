@@ -5,7 +5,6 @@
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/adjacency_list.hpp>
 
-#include "pathscontainer.h"
 #include "graphdata.h"
 using namespace boost;
 
@@ -13,6 +12,7 @@ struct Vertex
 {
     int id;
     float8 cost;
+    bool is_transition;
 };
 
 typedef adjacency_list < listS, vecS, directedS, no_property, Vertex> graph_t;
@@ -31,7 +31,6 @@ class Graph
 public:
     Graph(std::shared_ptr<GraphData> data);
 
-    paths_t getDBPathsTable(PathsContainer &paths);
     std::shared_ptr<graph_t> getGraphObj();
 
     /**
@@ -44,8 +43,10 @@ public:
     std::shared_ptr<edge_t> getEdge(int &sourceV, int &targetV);
     void   removeEdge(int &sourceV, int &targetV);
     void   addEdge(edge_t & e);
+    bool   isTransitionEdge(int &sourceV, int &targetV, bool& isTransition);
     int   getNumEdges();
-    double getPathCost(std::shared_ptr<Path> path);
+    vertex_descriptor getVertex(int vertexID);
+
 };
 
 #endif // GRAPH_H

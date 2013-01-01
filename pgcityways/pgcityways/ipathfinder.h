@@ -2,6 +2,7 @@
 #define IPATHFINDER_H
 
 #include "graph.h"
+#include "pathscontainer.h"
 
 struct TPatchsResult{
   PathsContainer paths;
@@ -12,10 +13,10 @@ struct TPatchsResult{
 class IPathFinder
 {
 protected:
-    Graph &graph;
+    std::shared_ptr<Graph> graph;
 public:
     virtual TPatchsResult findShortestPaths(int startVertexID, int endVertexID)=0;
-    IPathFinder(Graph &graph);
+    IPathFinder(std::shared_ptr<Graph> graph);
 };
 
 #endif // IPATHFINDER_H

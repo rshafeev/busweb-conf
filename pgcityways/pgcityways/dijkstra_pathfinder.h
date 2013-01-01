@@ -5,13 +5,11 @@
 class DijkstraPathFinder : public IPathFinder
 {
 private:
-    std::shared_ptr<Path> findDijkstraShortestPath(graph_t &graph,
+    std::shared_ptr<Path> findDijkstraShortestPath(std::shared_ptr<Graph> graph,
                                    vertex_descriptor m_source,
-                                   vertex_descriptor m_target,
-                                   std::vector<vertex_descriptor> &predecessors,
-                                   std::vector<float8> &distances);
+                                   vertex_descriptor m_target);
 public:
-    DijkstraPathFinder(Graph &graph);
+    DijkstraPathFinder(std::shared_ptr<Graph> graph);
     virtual TPatchsResult findShortestPaths(int startVertexID, int endVertexID);
 
 };

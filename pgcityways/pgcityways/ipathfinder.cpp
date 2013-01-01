@@ -1,7 +1,7 @@
 #include "ipathfinder.h"
 
 
-IPathFinder::IPathFinder( Graph &graph)
+IPathFinder::IPathFinder( std::shared_ptr<Graph> graph)
     :graph(graph)
 {
 }

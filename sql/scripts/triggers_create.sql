@@ -36,7 +36,7 @@ DECLARE
  _schedule_id           bigint;
  _schedule_group_id     bigint;
 BEGIN
-	INSERT INTO bus.routes (city_id,route_type_id,number,cost) 
+	/*INSERT INTO bus.routes (city_id,route_type_id,number,cost) 
 	   VALUES (NEW.id,bus.route_type_enum('c_route_station_input'),'',0.0)  
 	   RETURNING  id INTO  _route_id;
 	INSERT INTO bus.direct_routes (route_id,direct) VALUES (_route_id,B'0') 
@@ -46,21 +46,7 @@ BEGIN
 	INSERT INTO bus.route_relations (direct_route_id,station_A_id,station_B_id,position_index,ev_time,distance) 
           VALUES (_direct_route_id,null,null,0,interval '00:00:00',0);
           
-	/*
-	INSERT INTO bus.schedule (direct_route_id) VALUES(_direct_route_id) RETURNING id INTO _schedule_id;
-	INSERT INTO bus.schedule_groups (schedule_id) VALUES (_schedule_id) RETURNING id INTO _schedule_group_id;
- 
-    INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Sunday'));
-    INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Monday'));
-	INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Tuesday'));
-	INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Wednesday'));
-	INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Thursday'));
-	INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Friday'));
-    INSERT INTO bus.schedule_group_days (schedule_group_id,day_id) VALUES (_schedule_group_id,day_enum('c_Saturday'));
-      
-    INSERT INTO bus.timetable(schedule_group_id,time_A,time_B,frequency) 
-				VALUES (_schedule_group_id,time '00:00:00', time '24:00:00', interval '00:00:00');
-			*/	
+*/
 	RETURN NEW;
 END;
 $BODY$
@@ -73,9 +59,9 @@ $BODY$
 DECLARE
 
 BEGIN
-    DELETE FROM bus.routes 
+    /*DELETE FROM bus.routes 
 		   WHERE city_id = OLD.id AND 
-		   route_type_id = bus.route_type_enum('c_route_station_input');
+		   route_type_id = bus.route_type_enum('c_route_station_input');*/
 	RETURN OLD;
 END;
 $BODY$
@@ -90,7 +76,7 @@ DECLARE
  
 BEGIN
 --c_route_station_input
- SELECT * INTO _input_route FROM bus.routes 
+ /*SELECT * INTO _input_route FROM bus.routes 
           WHERE route_type_id = bus.route_type_enum('c_route_station_input') AND
                 city_id = NEW.city_id LIMIT 1;
  IF NOT FOUND THEN
@@ -104,7 +90,7 @@ BEGIN
  END IF;
  
  INSERT INTO bus.route_stations (direct_route_id,station_B_id,position_index,ev_time,distance) 
-          VALUES (_direct_route_id,NEW.id,0,'00:00:00',0.0);
+          VALUES (_direct_route_id,NEW.id,0,'00:00:00',0.0);*/
  RETURN NEW;
 END;
 $BODY$
@@ -116,7 +102,7 @@ $BODY$
 DECLARE
  
 BEGIN
- DELETE FROM bus.route_stations WHERE station_A_id = NULL AND station_B_id = OLD.id;
+ --DELETE FROM bus.route_stations WHERE station_A_id = NULL AND station_B_id = OLD.id;
  
  RETURN OLD;
 END;

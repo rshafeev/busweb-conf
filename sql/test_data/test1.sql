@@ -5,22 +5,19 @@
 				 bus.day_enum('c_Monday'),
 				 time  '10:00:00',
 				 500,
-				 ARRAY['c_route_station_input',
-				       'c_route_station_output',
-				       'c_route_transition',
-				       'c_route_trolley',
+				 ARRAY['c_route_trolley',
 				       'c_route_metro',
-				       'c_route_bus'],
+				       'c_route_bus',
+				       'c_route_station_output'],
 				 ARRAY[1,
 				       1,
 				       1,
-				       1,
-				       0.5,
 				       1],
 				 bus.alg_strategy('c_cost'),
-				 bus.lang_enum('c_ru')) WHERE path_id = 13  ORDER BY path_id,index; 
+				 bus.lang_enum('c_ru')) ORDER BY path_id,index; 
 
-select * from temp_paths join bus._graph_relations ON bus._graph_relations.id = graph_id
-WHERE path_id = 13 ;
+select * from temp_paths join bus._graph_relations ON bus._graph_relations.id = graph_id 
+WHERE path_id <> -1 
+ ORDER BY path_id,index;
 
 END;

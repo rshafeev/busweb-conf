@@ -9,6 +9,7 @@ typedef struct edge_columns
     int source;
     int target;
     int cost;
+    int is_transition;
     int reverse_cost;
 } edge_columns_t;
 
@@ -19,7 +20,8 @@ typedef struct edge
     int source;
     int target;
     float8 cost;
-    float8 reverse_cost;
+    bool is_transition;
+   // float8 reverse_cost;
 } edge_t;
 
 typedef struct paths_element

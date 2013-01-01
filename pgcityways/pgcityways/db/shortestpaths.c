@@ -62,6 +62,7 @@ static int fetch_edge_columns(SPITupleTable *SPI_tuptable, edge_columns_t *edge_
     edge_columns->source = SPI_fnumber(SPI_tuptable->tupdesc, "source");
     edge_columns->target = SPI_fnumber(SPI_tuptable->tupdesc, "target");
     edge_columns->cost = SPI_fnumber(SPI_tuptable->tupdesc, "cost");
+    edge_columns->is_transition = SPI_fnumber(SPI_tuptable->tupdesc, "is_transition");
     if (edge_columns->id == SPI_ERROR_NOATTRIBUTE ||
             edge_columns->source == SPI_ERROR_NOATTRIBUTE ||
             edge_columns->target == SPI_ERROR_NOATTRIBUTE ||
@@ -135,13 +136,19 @@ static void fetch_edge(HeapTuple *tuple, TupleDesc *tupdesc,
         elog(ERROR, "cost contains a null value");
     target_edge->cost = DatumGetFloat8(binval);
 
+    binval = SPI_getbinval(*tuple, *tupdesc, edge_columns->is_transition, &isnull);
+    if (isnull)
+        elog(ERROR, "is_transition contains a null value");
+    target_edge->is_transition = DatumGetBool(binval);
+   // elog(INFO,"transition %i",target_edge->is_transition);
+    //is_transition
     if (edge_columns->reverse_cost != -1)
     {
         binval = SPI_getbinval(*tuple, *tupdesc, edge_columns->reverse_cost,
                                &isnull);
         if (isnull)
             elog(ERROR, "reverse_cost contains a null value");
-        target_edge->reverse_cost =  DatumGetFloat8(binval);
+        //target_edge->reverse_cost =  DatumGetFloat8(binval);
     }
 }
 
@@ -163,8 +170,10 @@ static int compute_shortest_path(char* sql, int start_vertex,
     m_edge_columns.id = -1;
     m_edge_columns.source = -1;
     m_edge_columns.target = -1;
-    m_edge_columns.reverse_cost = -1;
     m_edge_columns.cost = -1;
+    m_edge_columns.is_transition = -1;
+    m_edge_columns.reverse_cost = -1;
+
 
     int v_max_id=0;
     int v_min_id=INT_MAX;

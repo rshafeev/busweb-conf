@@ -1,9 +1,12 @@
 #include <QFile>
 #include <QTextStream>
 #include <limits>
+#include <vector>
 
 #include "TestGraphDataLoader.h"
 #include "geopoint.h"
+
+using namespace std;
 
 TestGraphDataLoader::TestGraphDataLoader()
 {
@@ -89,6 +92,7 @@ std::shared_ptr<GraphData> TestGraphDataLoader::loadGraphData(QString fileName)
             e.id = id;
             e.source = edge.source;
             e.target = edge.target;
+            e.is_transition = false;
             e.cost = GeoPoint::getEuclidDistance(*p1,*p2);
             e.reverse_cost = -1;
             edges->push_back(e);

@@ -4,7 +4,6 @@
 #include <QtTest>
 
 #include "graphdata.h"
-#include "boost_dijkstra.cpp"
 class PgCityWaysTest : public QObject
 {
     Q_OBJECT
@@ -32,28 +31,7 @@ private Q_SLOTS:
 
     void testBoostDijkstra()
     {
-       paths_element_t      *paths;
-       int paths_count;
-       char * err_msg;
-       int source = 1;
-       int target = 6;
-       int result = boost_dijkstra(graphData->edges,
-                                   graphData->edgesCount,
-                                   source,
-                                   target,
-                                   graphData->directed,
-                                   graphData->hasReverseCost,
-                                   &paths,
-                                   &paths_count,
-                                   &err_msg);
-       cout << "\n";
-       for(int i=0;i < paths_count ; i++ ){
-           cout << paths[i].path_id << " " << paths[i].edge_id << " " << paths[i].vertex_id << "\n";
-       }
-       if(paths_count>0)
-       {
-           delete[] paths;
-       }
+
     }
 
 

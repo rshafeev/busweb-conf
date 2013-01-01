@@ -70,19 +70,19 @@ CREATE TYPE bus.relation AS
 
 
 CREATE TYPE bus.filter_path AS
-(
-   path_id                integer,
-   index                  integer,
-   direct_route_id        bigint,
-   route_type             bus.route_type_enum,
-   relation_index         integer,
-   relation_id            integer,
-   station_id             bigint,
-   move_time              interval,
-   wait_time              interval,
-   cost                   double precision,
-   distance               double precision
-);	
+   (
+    path_id integer,
+    graph_id bigint,
+    index integer,
+    relation_id integer,
+    direct_route_id bigint,
+    relation_index integer,
+    station_id bigint,
+    route_type bus.route_type_enum,
+    move_time interval,
+    cost double precision,
+    distance double precision,
+    is_transition  boolean);
 
 CREATE TYPE bus.way_elem AS
 (
@@ -504,16 +504,15 @@ CREATE TABLE bus._graph_relations
 (
   id 				  bigserial        	    NOT NULL,
   city_id 		      bigint 				NOT NULL,
-  route_type_id       bus.route_type_enum   NOT NULL,
-  relation_type       bus.route_type_enum   NOT NULL,
   relation_a_id       integer 				NOT NULL,
   relation_b_id       integer 				NOT NULL,
+  relation_b_type     bus.route_type_enum   NOT NULL,
   move_time           interval   			NOT NULL,
   wait_time           interval   			NOT NULL,
   cost_money          double precision 		NOT NULL,
   cost_time           double precision      NOT NULL,
   distance            double precision      NOT NULL,
-  
+  is_transition       boolean                NOT NULL,
   CONSTRAINT _graph_relations_pk PRIMARY KEY (id),
 
   CONSTRAINT _graph_relations_city_id_fk FOREIGN KEY (city_id)
