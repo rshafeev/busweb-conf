@@ -34,6 +34,7 @@ std::shared_ptr<Path> DijkstraPathFinder::findDijkstraShortestPath(std::shared_p
             pgDebug("DijkstraPathFinder finish null...");
             return std::shared_ptr<Path>(nullptr);
         }
+
         m_target = predecessors[m_target];
 
         path->getVertexes().push_back(m_target);
@@ -77,10 +78,12 @@ TPatchsResult DijkstraPathFinder::findShortestPaths(int startVertexID, int endVe
         result.result_code = -1;
         return result;
     }
-    paths.addPath(shortestPath);
+    for(int i=0;i < 25; i++){
+        paths.addPath(shortestPath);
+    }
     std::shared_ptr<Path> minPath = shortestPath;
     vector<edge_t> delete_edges;
-    unsigned int K = 10;
+    unsigned int K = 0;
     for(int k = 0; k < K; k++){
         edge_t del_e;
         double minCost = -1;

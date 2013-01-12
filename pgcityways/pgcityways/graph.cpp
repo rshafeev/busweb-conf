@@ -61,6 +61,7 @@ bool Graph::isTransitionEdge(int &sourceV, int &targetV,bool &isTransition)
         targ = target(e, g);
         if (targ == v_targ)
         {
+
             isTransition = g[*out_i].is_transition;
             return true;
         }
@@ -103,10 +104,9 @@ bool Graph::getEdge(edge_t& edge){
         targ = target(e, g);
         if (targ == v_targ)
         {
-
-            edge.id = g[*out_i].id;
-            edge.cost = g[*out_i].cost;
-            edge.is_transition = g[*out_i].is_transition;
+            edge.id = g[e].id;
+            edge.cost = g[e].cost;
+            edge.is_transition = g[e].is_transition;
             return true;
         }
     }

@@ -39,7 +39,6 @@ HEADERS +=  ../pgcityways/*.h \
     helpers/TestGraphDataLoader.h
 HEADERS +=  ../pgcityways/db/*.h
 
-#QMAKE_CXXFLAGS += -std=c++0x
 
 #BOOST LIB
 INCLUDEPATH +=/usr/include/boost
@@ -50,6 +49,7 @@ LIBS+=-L/usr/lib/boost  -lboost_graph \
 INCLUDEPATH +=/usr/include/postgresql/9.2/server
 
 QMAKE_CXXFLAGS += -std=c++0x
+
 # UNIT TESTS
 SOURCES += \
     main.cpp

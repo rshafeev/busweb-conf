@@ -1,0 +1,6 @@
+﻿select count(*) from bus._graph_relations where city_id = 2;
+/*
+insert into bus._graph_relations(city_id,relation_a_id,relation_b_id,relation_b_type,move_time,wait_time,cost_money,cost_time,distance,is_transition)
+  (select city_id,relation_a_id,relation_b_id,relation_b_type,move_time,wait_time,cost_money,cost_time,distance,is_transition from bus._graph_relations)
+
+  */
