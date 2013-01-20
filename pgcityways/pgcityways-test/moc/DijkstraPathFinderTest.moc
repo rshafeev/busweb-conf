@@ -1,7 +1,7 @@
 /****************************************************************************
 ** Meta object code from reading C++ file 'DijkstraPathFinderTest.cpp'
 **
-** Created: Tue Jan 1 23:11:19 2013
+** Created: Mon Jan 14 01:59:00 2013
 **      by: The Qt Meta Object Compiler version 63 (Qt 4.8.2)
 **
 ** WARNING! All changes made in this file will be lost!
@@ -22,7 +22,7 @@ static const uint qt_meta_data_DijkstraPathFinderTest[] = {
        6,       // revision
        0,       // classname
        0,    0, // classinfo
-       7,   14, // methods
+       8,   14, // methods
        0,    0, // properties
        0,    0, // enums/sets
        0,    0, // constructors
@@ -37,6 +37,7 @@ static const uint qt_meta_data_DijkstraPathFinderTest[] = {
      122,   23,   23,   23, 0x08,
      147,   23,   23,   23, 0x08,
      170,   23,   23,   23, 0x08,
+     204,   23,   23,   23, 0x08,
 
        0        // eod
 };
@@ -46,7 +47,9 @@ static const char qt_meta_stringdata_DijkstraPathFinderTest[] = {
     "findPathTest()\0findPathAndCreateDBSetTest()\0"
     "checkNotFoundDestinationVertexesTest()\0"
     "checkNotFoundPathsTest()\0"
-    "FoundOnlyOnePathTest()\0cleanupTestCase()\0"
+    "FoundOnlyOnePathTest()\0"
+    "findDijkstraShortestPathEdgTest()\0"
+    "cleanupTestCase()\0"
 };
 
 void DijkstraPathFinderTest::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, void **_a)
@@ -61,7 +64,8 @@ void DijkstraPathFinderTest::qt_static_metacall(QObject *_o, QMetaObject::Call _
         case 3: _t->checkNotFoundDestinationVertexesTest(); break;
         case 4: _t->checkNotFoundPathsTest(); break;
         case 5: _t->FoundOnlyOnePathTest(); break;
-        case 6: _t->cleanupTestCase(); break;
+        case 6: _t->findDijkstraShortestPathEdgTest(); break;
+        case 7: _t->cleanupTestCase(); break;
         default: ;
         }
     }
@@ -100,9 +104,9 @@ int DijkstraPathFinderTest::qt_metacall(QMetaObject::Call _c, int _id, void **_a
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 7)
+        if (_id < 8)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 7;
+        _id -= 8;
     }
     return _id;
 }

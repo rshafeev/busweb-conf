@@ -37,7 +37,6 @@ public:
         }
         return count;
     }
-     paths_t getDBPathsTable();
 
 
 };

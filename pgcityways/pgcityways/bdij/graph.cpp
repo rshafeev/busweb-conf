@@ -1,6 +1,7 @@
 #include "graph.h"
 #include <vector>
-#include "testlogger.h"
+#include "../log/testlogger.h"
+
 Graph::Graph(std::shared_ptr<GraphData> data)
 {
     this->data = data;
@@ -73,6 +74,10 @@ bool Graph::isTransitionEdge(int &sourceV, int &targetV,bool &isTransition)
 int Graph::getNumEdges()
 {
     return boost::num_edges(*this->graph.get());
+}
+int Graph::getNumVertices()
+{
+    return boost::num_vertices(*this->graph.get());
 }
 
 vertex_descriptor Graph::getVertex(int vertexID)

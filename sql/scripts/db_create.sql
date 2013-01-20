@@ -114,7 +114,14 @@ CREATE TYPE bus.paths_result AS
      edge_id     integer
 );
 
-
+CREATE TYPE bus.route_transition AS
+(
+  route_relation_a_id bigint 	       ,
+  route_relation_b_id bigint 	       ,
+  index_a             integer           ,
+  index_b             integer          ,
+  distance            double precision 
+);
 
 -- create views
 CREATE OR REPLACE VIEW bus.time_routes AS 
@@ -468,6 +475,27 @@ CREATE TABLE bus.timetable
 );
 
 --================
+CREATE TABLE bus.route_transitions
+(
+  id                  bigserial 	       NOT NULL,
+  route_relation_a_id bigint 	           NOT NULL,
+  route_relation_b_id bigint 	           NOT NULL,
+  index_a             integer              NOT NULL,
+  index_b             integer              NOT NULL,
+  distance            double precision 	   NOT NULL,
+ 
+  CONSTRAINT route_transitions_pk PRIMARY KEY (id),
+
+  CONSTRAINT route_transitions_route_relation_a_id_fk FOREIGN KEY (route_relation_a_id)
+      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+  
+  CONSTRAINT route_transitions_route_relation_b_id_fk FOREIGN KEY (route_relation_b_id)
+      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+  
+);
+--================
 CREATE TABLE bus.graph_relations
 (
   id 				  bigserial        	    NOT NULL,
@@ -498,6 +526,40 @@ CREATE TABLE bus.graph_relations
       ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
   
 
+);
+--================
+CREATE TABLE bus._droute_trees
+(
+  id 				  bigserial        	    NOT NULL,  -- id текущего нода
+  parent_id           bigint                        ,  -- ссылка на нод родителя
+  root_rid  		  bigint        	    NOT NULL,  -- direct_route_id корня дерева 
+  root_index          integer               NOT NULL,
+  curr_rid            bigint                NOT NULL,  -- текущий direct_route_id
+  curr_index          integer               NOT NULL,
+  level               integer               NOT NULL,  -- уровень дерева
+  parent_relation_id  bigint                        , 
+  
+  subpath_time_cost   timestamp             NOT NULL,  -- затраченное время на путь, исключая концы
+  subpath_money_cost  timestamp             NOT NULL,  -- стоимость всего пути
+  
+  CONSTRAINT _droute_trees_pk PRIMARY KEY (id),
+
+  CONSTRAINT _droute_trees_parent_id_fk FOREIGN KEY (parent_id)
+      REFERENCES bus._droute_trees (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE,
+  
+  CONSTRAINT _droute_trees_root_rid_fk FOREIGN KEY (root_rid)
+      REFERENCES bus.direct_routes (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE,
+  
+  CONSTRAINT _droute_trees_curr_rid_fk FOREIGN KEY (curr_rid)
+      REFERENCES bus.direct_routes (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE,
+      
+  CONSTRAINT _droute_trees_parent_relation_id_fk FOREIGN KEY (parent_relation_id)
+      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      ON UPDATE SET NULL ON DELETE SET NULL
+       
 );
 --================
 CREATE TABLE bus._graph_relations

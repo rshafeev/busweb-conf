@@ -8,28 +8,30 @@ CONFIG -= qt
 CONFIG += dll
 SOURCES += \
     db/shortestpaths.c \
-    boost_dijkstra.cpp \
-    graph.cpp \
-    ipathfinder.cpp \
-    dijkstra_pathfinder.cpp \
-    path.cpp \
-    pathscontainer.cpp \
-    geopoint.cpp\
-    graphdata.cpp \
-    testlogger.cpp
+    db/boost_dijkstra.cpp \
+    bdij/graph.cpp \
+    core/ipathfinder.cpp \
+    bdij/dijkstra_pathfinder.cpp \
+    core/path.cpp \
+    core/pathscontainer.cpp \
+    core/graphdata.cpp \
+    log/testlogger.cpp \
+    yen/YenPathFinder.cpp \
+    bdij/boostpath.cpp
 
 
 HEADERS += \
     db/shortestpaths.h \
     db/db_types.h \
-    graph.h \
-    ipathfinder.h \
-    dijkstra_pathfinder.h \
-    path.h \
-    pathscontainer.h \
-    geopoint.h \
-    graphdata.h \
-    testlogger.h
+    bdij/graph.h \
+    core/ipathfinder.h \
+    bdij/dijkstra_pathfinder.h \
+    core/path.h \
+    core/pathscontainer.h \
+    core/graphdata.h \
+    log/testlogger.h \
+    yen/YenPathFinder.h \
+    bdij/boostpath.h
 
 
 #BOOST LIB

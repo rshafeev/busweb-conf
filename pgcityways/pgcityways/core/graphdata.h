@@ -1,7 +1,7 @@
 #ifndef GRAPHDATA_H
 #define GRAPHDATA_H
 #include <memory>
-#include "db/db_types.h"
+#include "../db/db_types.h"
 class GraphData
 {
 public:

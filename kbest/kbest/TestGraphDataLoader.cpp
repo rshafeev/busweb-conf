@@ -17,7 +17,7 @@ bool parseEdge(QString &line,GraphArc &e){
     double target = std::numeric_limits<int>::min();
     double weight = -1 ;
     in  >> source >> target >> weight;
-    if( source < 0 || target < 0 || weight < 0)
+    if( source < 0 || target < 0)
         return false;
     e.source = source;
     e.dest =target;

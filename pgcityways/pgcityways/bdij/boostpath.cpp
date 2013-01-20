@@ -1,35 +1,17 @@
-#include "path.h"
-#include <string>
-#include <sstream>
-
-#include "testlogger.h"
-
-Path::Path(std::shared_ptr<Graph> graph,vector<int>  vertexes)
+#include "boostpath.h"
+#include  "../log/testlogger.h"
+BoostPath::BoostPath(std::shared_ptr<Graph> graph)
 {
-    this->vertexes = vertexes;
-    this->graph = graph;
+  this->graph = graph;
 }
-Path::Path(std::shared_ptr<Graph> graph)
+
+BoostPath::BoostPath(std::shared_ptr<Graph> graph, vector<int>  vertexes)
+    :Path(vertexes)
 {
-    this->graph = graph;
+  this->graph = graph;
 }
 
-vector<int>& Path::getVertexes(){
-    return this->vertexes;
-}
-
-
-const char* Path::toString(){
-    std::ostringstream stringStream;
-    stringStream << "\n";
-    for(int i=this->vertexes.size()-1;i >=0; i--){
-        stringStream <<"vertex[" << (this->vertexes.size() - i)  <<  "] =  " << vertexes[i] << "\n";
-    }
-    return stringStream.str().c_str();
-
-}
-
-double Path::getCost()
+double BoostPath::getCost()
 {
     double cost = 0.0;
 
@@ -45,12 +27,12 @@ double Path::getCost()
     return cost;
 }
 
-bool Path::getEdge(edge_t &edge)
+bool BoostPath::getEdge(edge_t &edge)
 {
     return this->graph->getEdge(edge);
 }
 
-bool Path::check()
+bool BoostPath::check()
 {
     std::vector<int>& path_vect = this->getVertexes();
     pgDebug("Check:");
@@ -60,7 +42,7 @@ bool Path::check()
 
         graph->isTransitionEdge(path_vect.at(i),path_vect.at(i-1),tr1);
         graph->isTransitionEdge(path_vect.at(i-1),path_vect.at(i-2),tr2);
-        pgDebug(tr1);
+        pgDebug("Check edge: %i",&tr1);
         if(tr1 == true && tr2 == true){
             return false;
         }
@@ -70,20 +52,4 @@ bool Path::check()
 
     return true;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

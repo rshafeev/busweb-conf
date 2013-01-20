@@ -5,8 +5,8 @@
 #include <QtTest>
 #include <qmetaobject.h>
 
-#include "graph.h"
-#include "dijkstra_pathfinder.h"
+#include "bdij/graph.h"
+#include "bdij/dijkstra_pathfinder.h"
 #include "helpers/TestGraphDataLoader.h"
 
 class GraphTest : public QObject
@@ -18,7 +18,7 @@ public:
 private slots:
     void initTestCase(){
         TestGraphDataLoader loader;
-        graphData = loader.loadGraphData("../test-data/graph1.dat");
+        graphData = loader.loadEuclidGraphData("../test-data/graph1.dat");
 
         std::shared_ptr<Graph> graph = std::shared_ptr<Graph>(new Graph(graphData) );
 

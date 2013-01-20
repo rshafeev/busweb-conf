@@ -3,7 +3,7 @@
 
 #include <QtTest>
 
-#include "graphdata.h"
+#include "core/graphdata.h"
 class PgCityWaysTest : public QObject
 {
     Q_OBJECT
@@ -17,7 +17,7 @@ private Q_SLOTS:
     void initTestCase()
     {
         TestGraphDataLoader loader;
-        graphData = loader.loadGraphData("../test-data/graph1.dat");
+        graphData = loader.loadEuclidGraphData("../test-data/graph1.dat");
 
         for(int i=0;i < graphData->edgesCount; i++){
             edge_t e = graphData->edges[i];

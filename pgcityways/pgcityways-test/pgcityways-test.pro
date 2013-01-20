@@ -24,21 +24,32 @@ else {
     DESTDIR = release
 }
 
-# INCLUDE pgcityways SOURCES
+# INCLUDE SOURCES pgcityways ###
 
-INCLUDEPATH+=../pgcityways
-INCLUDEPATH+=../pgcityways/db
+INCLUDEPATH += ../pgcityways
 
-SOURCES +=  ../pgcityways/*.cpp \
-    helpers/TestGraphDataLoader.cpp \
+
+SOURCES +=  ../pgcityways/bdij/*.cpp \
+    YenPathFinderTest.cpp
+SOURCES +=  ../pgcityways/core/*.cpp
+SOURCES +=  ../pgcityways/yen/*.cpp
+SOURCES +=  ../pgcityways/log/*.cpp
+
+HEADERS +=  ../pgcityways/bdij/*.h
+HEADERS +=  ../pgcityways/core/*.h
+HEADERS +=  ../pgcityways/yen/*.h
+HEADERS +=  ../pgcityways/log/*.h
+HEADERS +=  ../pgcityways/db/*.h
+####################################
+
+SOURCES +=    helpers/TestGraphDataLoader.cpp \
     DijkstraPathFinderTest.cpp \
     GraphTest.cpp \
-    PgCityWaysTest.cpp
+    PgCityWaysTest.cpp\
+    helpers/geopoint.cpp
 
-HEADERS +=  ../pgcityways/*.h \
-    helpers/TestGraphDataLoader.h
-HEADERS +=  ../pgcityways/db/*.h
-
+HEADERS +=  helpers/TestGraphDataLoader.h \
+            helpers/geopoint.h
 
 #BOOST LIB
 INCLUDEPATH +=/usr/include/boost

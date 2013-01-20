@@ -5,7 +5,8 @@
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/adjacency_list.hpp>
 
-#include "graphdata.h"
+#include "../core/graphdata.h"
+
 using namespace boost;
 
 struct Vertex
@@ -45,6 +46,7 @@ public:
     void   addEdge(edge_t & e);
     bool   isTransitionEdge(int &sourceV, int &targetV, bool& isTransition);
     int   getNumEdges();
+    int   getNumVertices();
     vertex_descriptor getVertex(int vertexID);
 
 };
