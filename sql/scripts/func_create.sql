@@ -1,253 +1,508 @@
-﻿
+﻿--==========================================================================================================================  
 /*
-SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity WHERE pg_stat_activity.datname = 'bus.test';
-select bus.update_graph_relations(id) from bus.routes WHERE route_type_id <> bus.route_type_enum('c_route_station_input') LIMIT 10;
+  Функция добавляет дугу в граф
+  @edit           INSERT into bus._graph_relations
 */
+CREATE OR REPLACE FUNCTION bus._insert_graph_relation( m_city_id bigint,
+													   m_node_a_id bigint,
+													   m_node_b_id bigint,
+													   m_relation_id bigint,
+													   m_relation_type bus.route_type_enum,
+													   m_move_time   interval,
+													   m_wait_time  interval,
+													   m_cost_money double precision,
+													   m_distance   double precision)
+ RETURNS bigint AS
+$BODY$
+DECLARE
+ _id bigint;
+BEGIN
+  if m_relation_id is not null then
+	insert into bus._graph_relations (
+					city_id,
+					node_a_id,
+					node_b_id,
+					relation_type,
+					move_time,
+					wait_time,
+					cost_money,
+					cost_time,
+					distance,
+					route_relation_id) 
+	     values (
+					m_city_id,
+					m_node_a_id,
+					m_node_b_id,
+					m_relation_type,
+					m_move_time,
+					m_wait_time,
+					m_cost_money,
+					EXTRACT(EPOCH FROM m_move_time + m_wait_time),
+					m_distance,
+					m_relation_id
+	     ) returning id into _id;  
+  else 
+ 	insert into bus._graph_relations (
+					city_id,
+					node_a_id,
+					node_b_id,
+					relation_type,
+					move_time,
+					wait_time,
+					cost_money,
+					cost_time,
+					distance) 
+	     values (
+					m_city_id,
+					m_node_a_id,
+					m_node_b_id,
+					m_relation_type,
+					m_move_time,
+					m_wait_time,
+					m_cost_money,
+					EXTRACT(EPOCH FROM m_move_time + m_wait_time),
+					m_distance
+	     ) returning id into _id;   
+  
+  end if;
+  return _id;
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
 
+--==========================================================================================================================  
+/*
+  Функция обновляет узлы и дуги в графе, соотв.  маршруту (_direct_route_id)
+  @_direct_route_id  ID машрута (таблица bus.direct_routes)
+  @edit              CRUD in bus._graph_nodes
+  @edit              CRUD in bus._graph_relations
+*/
+CREATE OR REPLACE FUNCTION bus.refresh_graph_by_droute(_direct_route_id bigint)
+ RETURNS void AS
+$BODY$
+DECLARE
+  _r bus.route_relations%ROWTYPE;
+  _node_a_id bigint;
+  _node_b_id bigint;
+  _city_id bigint;
+  m_route_id bigint;
+  m_wait_time interval;
+  m_pause interval;
+  m_cost double precision;
+  m_route_type bus.route_type_enum;
+  m_route_freq interval;
+BEGIN
 
-CREATE OR REPLACE FUNCTION bus._recurs_get_path_droutes(curr_node    bigint,
-													    _droutes bigint[]
-                                                     )
- RETURNS bigint[] AS
+ m_pause     := interval '00:00:08';
+ 
+  -- Узнаем id города данного маршрута; id, тип, стоимость маршрута
+  select city_id, route_type_id, cost  , bus.routes.id into 
+        _city_id, m_route_type , m_cost, m_route_id     from bus.direct_routes 
+       join bus.routes on bus.routes.id = route_id
+       where bus.direct_routes.id = _direct_route_id limit 1;
+  -- Узнаем время ожидания транспортного средства данного маршрута
+  select freq into m_route_freq from bus.time_routes where route_id = m_route_id limit 1;
+  
+  -- Удалим все узлы из графа, соответств. данному маршруту
+  delete from bus._graph_nodes where route_relation_id in 
+  ( select id from bus.route_relations where direct_route_id = _direct_route_id);
+  
+  /* Удалим все дуги, соотв. данному маршруту 
+  впринципе, можно опустить, т.к.  дуги должны были удалиться каскадно после удаления узлов*/
+  delete from bus._graph_relations where route_relation_id in 
+  ( select id from bus.route_relations where direct_route_id = _direct_route_id);
+  
+  -- Добавим узлы, соотв. данному маршруту (id,station_b_id) из таблицы bus.route_relations
+  insert into bus._graph_nodes (station_id,route_relation_id)
+  select station_b_id as station_id, id as route_relation_id 
+         from bus.route_relations
+         where direct_route_id =  _direct_route_id;
+  
+  -- Добавим дуги 
+  for _r in select * from  bus.route_relations  where direct_route_id =  _direct_route_id
+  loop
+       _node_a_id := bus._refresh_graph_node_by_station(_r.station_b_id,null);
+       _node_b_id := bus._refresh_graph_node_by_station(_r.station_b_id,_r.id);
+    --  raise notice '%,%,%,%',_r.direct_route_id,_node_a_id,_node_b_id,_r;
+       -- Добавим вход в маршрут
+     perform bus._insert_graph_relation(_city_id,_node_a_id,_node_b_id,null,bus.route_type_enum('c_route_station_input'),
+                                           interval '00:00:00',m_route_freq,m_cost, 0.0);
+  
+     perform bus._insert_graph_relation(_city_id,_node_b_id,_node_a_id,null,bus.route_type_enum('c_route_station_output'),
+                                           interval '00:00:00',interval '00:00:00',0.0, 0.0);
+     if _r.station_a_id is not null then
+		 _node_a_id := bus.get_graph_node_by_route(_r.station_a_id,_r.direct_route_id);
+	     _node_b_id := bus.get_graph_node_by_station(_r.station_b_id,_r.id);
+		 perform bus._insert_graph_relation(_city_id,_node_a_id,_node_b_id,_r.id,m_route_type,
+                                           _r.ev_time + m_pause ,interval '00:00:00',0.0, _r.distance);
+     end if;
+     
+   end loop;  
+    
+
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+/*
+  Функция удаляет переход м/у станциями
+  @station_transition_id  ID перехода
+  @edit           DELETE from bus.station_transitions
+  @edit           DELETE from bus_graph_relations
+*/
+CREATE OR REPLACE FUNCTION bus.delete_station_transition(station_transition_id bigint)
+ RETURNS void AS
+$BODY$
+DECLARE
+BEGIN
+  -- Удалим переход из графа 
+  execute _delete_station_transition_from_graph(station_transition_id);
+  -- Удалим переход
+  delete from bus.station_transitions where id = _station_transition_id;
+  
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+/*
+  Функция добавляет переход м/у станциями
+  @_station_a_id  Начальная станция
+  @_station_b_id  Конечная станция
+  @_is_manual     Переход был добавлен администратором (true) или с помощью  ф-ции bus.refresh_station_transitions() 
+  @edit           INSERT into bus.station_transitions
+  @edit           INSERT into bus_graph_relations
+*/
+CREATE OR REPLACE FUNCTION bus.add_station_transition(_station_a_id bigint,
+													  _station_b_id bigint,
+													  _is_manual bool)
+ RETURNS void AS
+$BODY$
+DECLARE
+ _transition_id bigint;
+BEGIN
+  
+  select id into _transition_id from bus.station_transitions where station_a_id = _station_a_id and station_b_id = _station_b_id;
+  if _transition_id is not null then
+     return;
+  end if;
+  -- Добавим возможные переходы со станции _station_id
+  insert into bus.station_transitions (station_a_id,station_b_id,distance,move_time,is_manual) 
+     values(
+       _station_a_id,
+       _station_b_id,
+       bus.stations_distance(_station_a_id,_station_b_id),
+       bus.stations_distance(_station_a_id,_station_b_id)/1000.0/bus._WALKING_SPEED()* 60* interval '00:01:00',
+       _is_manual
+     ) returning id into _transition_id;
+
+  execute bus._refresh_graph_node_by_station(_station_a_id,null);
+  execute bus._refresh_graph_node_by_station(_station_b_id,null);
+  
+  -- Добавим переход в граф
+  execute bus._add_station_transition_into_graph(_transition_id);
+  
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+/*
+  Ищет ID узла в графе, который соответствует станции с ID = _station_id
+  @_station_id    Станция маршрута
+  @droute_id      Маршрут
+  @edit           none
+  @return         ID узла в графе
+*/
+CREATE OR REPLACE FUNCTION bus.get_graph_node_by_route(_station_id bigint, droute_id bigint)
+RETURNS bigint AS
+$BODY$
+DECLARE
+  _node_id  bigint;
+BEGIN
+   select bus._graph_nodes.id into _node_id from bus._graph_nodes
+          join bus.route_relations on bus.route_relations.id = bus._graph_nodes.route_relation_id
+          where station_b_id = _station_id and direct_route_id = droute_id limit 1;
+   return _node_id;
+   
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+/*
+  Ищет ID узла в графе, который соответствует станции с ID = _station_id
+  @_station_id    Станция
+  @_route_relation_id   Дуга маршрута, can null
+  @edit           none
+  @return         ID узла в графе
+*/
+CREATE OR REPLACE FUNCTION bus.get_graph_node_by_station(_station_id bigint, _route_relation_id bigint)
+RETURNS bigint AS
+$BODY$
+DECLARE
+  _node_id  bigint;
+BEGIN
+   if _route_relation_id is null then
+		select id into _node_id from bus._graph_nodes where station_id = _station_id and route_relation_id is null;
+		return _node_id;
+   end if;
+  select id into _node_id from bus._graph_nodes where station_id = _station_id and route_relation_id = _route_relation_id;
+  return _node_id;
+   
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+/*
+  Удаляем дугу из графа, которая соответствует переходу station_transition_id(таблица bus.station_transitions) 
+  @station_transition_id    ID перехода м/у станциями
+  @edit           DELTE from bus._graph_relations
+*/
+CREATE OR REPLACE FUNCTION bus._delete_station_transition_from_graph(station_transition_id bigint)
+RETURNS void AS
+$BODY$
+DECLARE
+  _transition  bus.station_transitions%ROWTYPE;
+  _node_a_id bigint;
+  _node_b_id bigint;
+BEGIN
+   -- Узнаем id начального и конечного узла для перехода
+   select * into _transition from bus.station_transitions where id = station_transition_id limit 1;
+   _node_a_id := bus.get_graph_node_by_station(_transition.station_a_id,null);
+   _node_b_id := bus.get_graph_node_by_station(_transition.station_b_id,null);
+   
+   -- Удалим переход из графа
+   delete from bus._graph_relations where node_a_id = _node_a_id and node_b_id = _node_b_id;
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+/*
+  Добавляет дугу в граф, которая соответствует переходу между станциями(таблица bus.station_transitions) 
+  @station_transition_id    ID перехода м/у станциями
+  @edit                     INSERT into bus._graph_relations
+*/
+CREATE OR REPLACE FUNCTION bus._add_station_transition_into_graph(station_transition_id bigint)
+RETURNS void AS
+$BODY$
+DECLARE
+  _transition  bus.station_transitions%ROWTYPE;
+  _node_a_id bigint;
+  _node_b_id bigint;
+  _graph_relation_id bigint;
+  _city_id bigint;
+BEGIN
+   
+   -- Узнаем id начального и конечного узла для перехода
+   select * into _transition from bus.station_transitions where id = station_transition_id limit 1;
+   
+   _node_a_id := bus.get_graph_node_by_station(_transition.station_a_id,null);
+   if _node_a_id is null then
+     return;
+   end if;
+   
+   _node_b_id := bus.get_graph_node_by_station(_transition.station_b_id,null);
+   
+   if _node_b_id is null then
+     return;
+   end if;
+   
+   -- Узнаем город, в котором находится данный переход
+   select city_id into _city_id from bus.stations where id = _transition.station_a_id limit 1;
+   
+   -- Проверим, был ли ранее добавлен переход в граф
+   _graph_relation_id:= null;
+   select id into _graph_relation_id from bus._graph_relations
+             where node_a_id = _node_a_id and node_b_id = _node_b_id limit 1;
+  
+   --raise notice 'node_a % , node_b %',_node_a_id,_node_b_id;
+   
+   -- Если переход уже был добавлен в граф, выходим
+   if _graph_relation_id is not null then
+     return;
+   end if;
+   
+   -- Добавим переход в граф
+   insert into bus._graph_relations (
+					city_id,
+					node_a_id,
+					node_b_id,
+					relation_type,
+					move_time,
+					wait_time,
+					cost_money,
+					cost_time,
+					distance) 
+	     values (
+					_city_id,
+					_node_a_id,
+					_node_b_id,
+					bus.route_type_enum('c_route_transition'),
+					_transition.move_time,
+					interval '00:00:00',
+					0.0,
+					EXTRACT(EPOCH FROM _transition.move_time),
+					_transition.distance
+	     );     
+   
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+/*
+  Обновляет узел графа, который соотносится со станцией _station_id.
+  В случае, если узел уже есть, ничего не делает. Если узла нет, то добавляет его.
+  @_station_id          Станция
+  @_route_relation_id   Дуга маршрута, can null
+  @edit                 CRUD in bus._graph_nodes
+  @return               Расстояние между станциями
+*/
+CREATE OR REPLACE FUNCTION bus._refresh_graph_node_by_station(_station_id bigint,_route_relation_id bigint)
+RETURNS bigint AS
+$BODY$
+DECLARE
+  _node_id  bigint;
+BEGIN
+   if _route_relation_id is null then
+		select id into _node_id from bus._graph_nodes where 
+		          station_id =  _station_id and route_relation_id  is null;
+		if _node_id is null then
+			insert into bus._graph_nodes (station_id) 
+			                       values(_station_id) returning id into _node_id;
+		end if;
+  else
+   		select id into _node_id from bus._graph_nodes where 
+		          station_id =  _station_id and route_relation_id  = _route_relation_id;
+		if _node_id is null then
+			insert into bus._graph_nodes (station_id,route_relation_id)
+			                       values(_station_id,_route_relation_id) returning id into _node_id;
+		end if;
+  end if;
+  return _node_id;
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+         
+--==========================================================================================================================  
+/*
+  Функция вычисляет геогр. расстояние между станциями
+  @_station_a_id  Первая станция
+  @_station_b_id  Вторая станция
+  @edit           IMMUTABLE
+  @return         Расстояние между станциями
+*/
+CREATE OR REPLACE FUNCTION bus.stations_distance(_station_a_id bigint, _station_b_id bigint)
+RETURNS double precision AS
+$BODY$
+DECLARE
+ _distance double precision;
+ p1 geography;
+ p2 geography;
+BEGIN
+ SELECT location INTO p1 FROM bus.stations where id = _station_a_id LIMIT 1;
+ IF NOT FOUND THEN
+	return false;
+ END IF;
+ SELECT location INTO p2 FROM bus.stations where id = _station_b_id LIMIT 1;
+ IF NOT FOUND THEN
+	return false;
+ END IF;
+
+ return st_distance(p1, p2);
+END;
+$BODY$
+LANGUAGE plpgsql IMMUTABLE;
+
+--==========================================================================================================================  
+/*
+  Функция определяет, являются ли геогр. расстояние между станциями меньше max_distance
+  @_station_a_id  Первая станция
+  @_station_b_id  Вторая станция
+  @edit           IMMUTABLE
+  @return         True: расстояние м/у станциями меньше max_distance, False : иначе
+*/
+CREATE OR REPLACE FUNCTION bus.is_nearest_stations(_station_a_id bigint, _station_b_id bigint,max_distance double precision)
+RETURNS bool AS
+$BODY$
+DECLARE
+ _distance double precision;
+ p1 geography;
+ p2 geography;
+BEGIN
+ SELECT location INTO p1 FROM bus.stations where id = _station_a_id LIMIT 1;
+ IF NOT FOUND THEN
+	return false;
+ END IF;
+ SELECT location INTO p2 FROM bus.stations where id = _station_b_id LIMIT 1;
+ IF NOT FOUND THEN
+	return false;
+ END IF;
+
+ return ST_DWithin(p1, p2,max_distance);
+END;
+$BODY$
+LANGUAGE plpgsql IMMUTABLE;
+
+--==========================================================================================================================  
+/*
+  Функция refresh_station_transitions добавляет возможные переходы со станции _station_id
+  @_station_id  Id станции, для которой ищем переход на другие станции
+  @edit         bus.station_transitions
+  @edit         bus._graph_nodes
+  @edit         bus._graph_relations  
+*/
+CREATE OR REPLACE FUNCTION bus.refresh_station_transitions(_station_id bigint)
+ RETURNS void AS
 $BODY$
 DECLARE
  _curr_rid bigint;
  _parent_id bigint;
+ _city_id  bigint;
+ _r record;
 BEGIN
-  SELECT curr_rid,parent_id INTO _curr_rid,_parent_id FROM  bus._droute_trees WHERE id = curr_node;
-  _droutes := array_append(_droutes,_curr_rid);
-  IF _parent_id IS NOT NULL THEN
-	_droutes := bus._recurs_get_path_droutes(_parent_id,_droutes);
-  END IF;
-  return _droutes;
-END;
-$BODY$
-LANGUAGE plpgsql VOLATILE;
-                                                    
---==========================================================================================================================  
+  -- Узнаем city_id для станции station_id
+  select city_id from into  _city_id bus.stations where id = _station_id limit 1;
 
+  /* В процессе изменения станции возможно было изменение ее местоположения и в таком случае нужно
+   удалить все старые переходы, которые уже невозможны c/на станцию _station_id
+  */
+  perform bus.delete_station_transition(id) from bus.station_transitions 
+          where (station_a_id = _station_id or station_b_id = _station_id ) and 
+                bus.is_nearest_stations(station_a_id,station_b_id,bus._MAX_TRANSITION_DISTANCE()) = false and 
+                is_manual = false;
 
-CREATE OR REPLACE FUNCTION bus._recurs_make_subpaths(curr_node    bus._droute_trees,
-													 curr_droutes bigint[],
-													 _city_id bigint
-                                                     )
-RETURNS void AS
-$BODY$
-DECLARE
- _r          record;
- new_node    bus._droute_trees;
-
- transition   bus.route_transition;
- _root_index  integer;
- 
-BEGIN
-  curr_droutes :=  array_append(curr_droutes,curr_node.curr_rid);
-  FOR _r IN 
-     SELECT bus.direct_routes.id as droute_id  FROM bus.direct_routes
-     JOIN   bus.routes ON bus.routes.id = bus.direct_routes.route_id
-     WHERE  city_id = _city_id AND
-            bus.direct_routes.id <> ANY(curr_droutes) AND
-            bus.possible_route_transiton(curr_node.curr_rid,bus.direct_routes.id,curr_node.curr_index) = true
-  LOOP
-    transition:= bus.find_route_transiton(curr_node.curr_rid, _r.droute_id,curr_node.curr_index);
-    new_node.id                 := -1;
-    new_node.parent_id          := curr_node.id;
-    new_node.root_rid           := curr_node.root_rid;
-    new_node.root_index         := -1;
-    new_node.curr_rid           := _r.droute_id;
-    new_node.curr_index         := transition.index_b;
-    new_node.level              := curr_node.level + 1;
-    new_node.parent_relation_id := transition.route_relation_a_id;
-     
-    if curr_node.level = 0 then
-		new_node.root_index := transition.index_a;
-    else
-        new_node.root_index := curr_node.root_index;
-    end if;
-    
-	INSERT INTO bus._droute_trees (parent_id,root_rid,root_index,curr_rid,curr_index,level,parent_relation_id)
-			VALUES (new_node.parent_id,   -- parent_id
-			        new_node.root_rid,  -- root_rid
-			        new_node.root_index,  -- root_index
-			        new_node.curr_rid,    -- curr_rid
-			        new_node.curr_index,    -- curr_index
-			        new_node.level,            -- level
-			        new_node.parent_relation_id  -- parent_relation_id
-			        ) RETURNING id INTO new_node.id;
-	if new_node.level < bus._MAX_TREE_LEVEL() then
-		--execute bus._recurs_make_subpaths(new_node,curr_droutes,_city_id);
-    end if;
-  END LOOP; 
+  -- Обновим узел в графе		       
+  execute bus._refresh_graph_node_by_station(_station_id,null);
   
+  -- обновим изменения 
+  /*  not implemented */ 
   
-END;
-$BODY$
-LANGUAGE plpgsql VOLATILE;
+  -- Добавим возможные переходы со станции _station_id
+  perform bus.add_station_transition(_station_id,bus.stations.id,false) from bus.stations
+		 left join bus.station_transitions on bus.station_transitions.station_a_id = _station_id and
+		                                      bus.station_transitions.station_b_id = bus.stations.id 
+		 where bus.stations.city_id = _city_id and
+		       bus.station_transitions.station_a_id is null and
+		       bus.stations.id <> _station_id and
+		       bus.is_nearest_stations(_station_id,bus.stations.id,bus._MAX_TRANSITION_DISTANCE()) = true;
 
---==========================================================================================================================  
-
-CREATE OR REPLACE FUNCTION bus._make_subpaths(droute_id bigint, _city_id bigint)
-RETURNS void AS
-$BODY$
-DECLARE
- _curr_node  bus._droute_trees%ROWTYPE;
- droutes bigint[];
-BEGIN
-  FOR _curr_node IN 
-     SELECT * FROM  bus._droute_trees 
-     WHERE bus._droute_trees.curr_rid = droute_id AND level < bus._MAX_TREE_LEVEL()
-  LOOP
-     droutes := bus._recurs_get_path_droutes(_curr_node.id, droutes ) ;
-     EXECUTE bus._recurs_make_subpaths(_curr_node, droutes,_city_id);
- 
-  END LOOP;
+  -- Добавим возможные переходы на станцию _station_id
+  perform bus.add_station_transition(bus.stations.id,_station_id,false) from bus.stations
+		 left join bus.station_transitions on bus.station_transitions.station_a_id = bus.stations.id and
+										      bus.station_transitions.station_b_id = _station_id
+		 where bus.stations.city_id = _city_id and
+		       bus.station_transitions.station_a_id is null and
+		       bus.stations.id <> _station_id and
+		       bus.is_nearest_stations(_station_id,bus.stations.id,bus._MAX_TRANSITION_DISTANCE()) = true;
 
 END;
 $BODY$
 LANGUAGE plpgsql VOLATILE;
-
---==========================================================================================================================  
-CREATE OR REPLACE FUNCTION bus.update_droute_trees(droute_id bigint)
-RETURNS void AS
-$BODY$
-DECLARE
- _r  		  record;
- _city_id     bigint;
- _route_id    bigint;
- transition   bus.route_transition;
- _root_index  integer;
-BEGIN
-  -- Найдем id города, которому принадлежит текущий маршрут
-  SELECT bus.routes.city_id,bus.routes.id INTO _city_id,_route_id FROM bus.direct_routes
-       join bus.routes ON bus.routes.id = bus.direct_routes.route_id
-       where bus.direct_routes.id = droute_id LIMIT 1;
- 
-  -- Удалим все ноды, соотв. текущему маршруту
-  DELETE FROM bus._droute_trees WHERE curr_rid = droute_id;
-  
-  -- Добавим корень дерева 
-  INSERT INTO bus._droute_trees (parent_id,root_rid,root_index,curr_rid,curr_index,level,parent_relation_id)
-			VALUES (NULL,droute_id,0,droute_id,0,0,NULL);
- 
-  --Добавим ноды, соотв. текущему маршруту к тем родителям, с которых возможен переход на текущий маршрут   
- FOR _r IN 
-     select bus._droute_trees.id               as node_id,
-			bus._droute_trees.root_rid         as root_rid,
-			bus._droute_trees.root_index       as root_index,
-			bus._droute_trees.curr_rid         as curr_rid,
-			bus._droute_trees.curr_rid         as curr_index,
-			bus._droute_trees.level            as level
-			
-			from bus._droute_trees
-		    join bus.direct_routes ON bus.direct_routes.id = bus._droute_trees.curr_rid
-			join bus.routes        ON bus.routes.id = bus.direct_routes.route_id
-			where city_id = _city_id and
-				level < bus._MAX_TREE_LEVEL() and
-				bus.routes.id <> _route_id and
-				bus.possible_route_transiton(curr_rid,droute_id,curr_index) = true
-LOOP
-    transition:= find_route_transiton(_r.curr_rid,droute_id,_r.curr_index);
-    if _r.level = 0 then
-		_root_index := transition.index_a;
-    else
-       _root_index  := _r.root_index;
-    end if;
-	INSERT INTO bus._droute_trees (parent_id,root_rid,root_index,curr_rid,curr_index,level,parent_relation_id)
-			VALUES (_r.node_id,   -- parent_id
-			        _r.root_rid,  -- root_rid
-			        _root_index,  -- root_index
-			        droute_id,    -- curr_rid
-			        transition.index_b,    -- curr_index
-			        _r.level+1,            -- level
-			        transition.route_relation_a_id  -- parent_relation_id
-			        );
- 
-
-END LOOP;
-  -- Создадим поддеревья, корнями для которых являются ноды, соотв. текущему маршруту 
-  EXECUTE bus._make_subpaths(droute_id,_city_id);
-
-END;
-$BODY$
-LANGUAGE plpgsql VOLATILE;
-
-
---==========================================================================================================================  
-
-CREATE OR REPLACE FUNCTION bus.possible_route_transiton( _from_droute_id  bigint, 
-                                                    _to_droute_id    bigint,
-                                                    _start_index     integer
-                                                    )
-RETURNS bool AS
-$BODY$
-DECLARE
- _r bus.route_transition;
-BEGIN   
-  _r :=  bus.find_route_transiton(_from_droute_id,_to_droute_id,_start_index);
-  if _r IS NULL THEN
-    return false;
-  END IF;
-  return true;
-END;
-$BODY$
-LANGUAGE plpgsql IMMUTABLE;
-                                              
---==========================================================================================================================  
-/*
-  Функция get_route_transiton ищет первый возможый переход с маршрута _from_droute_id на 
-  маршрут _to_droute_id, начиная с дуги первого маршрута, индекс которой равен _start_index.
-  
-  @_from_droute_id Id маршрута, для которого ищем переход на маршрут _to_droute_id
-  @_to_droute_id Id машршрута, на который возможен переход с маршрута _from_droute_id
-  @_start_index Индекс дуги маршута droute1_id, с которой начинаем поиск перехода на droute2_id
-  @return Возвращает первый найденный переход
-*/
-CREATE OR REPLACE FUNCTION bus.find_route_transiton( _from_droute_id  bigint, 
-                                                    _to_droute_id    bigint,
-                                                    _start_index     integer
-                                                    )
-RETURNS bus.route_transition AS
-$BODY$
-DECLARE
- _r bus.route_transition;
-BEGIN
--- Найдем дуги(переходы) между пересек. маршрутами
- FOR _r IN 
-   SELECT  
-           table1.id as route_relation_a_id, 
-           table2.id as route_relation_b_id, 
-           table1.position_index as index_a,
-           table2.position_index as index_b,
-           st_distance(table1.location, table2.location) as distance
-   FROM  
-	(select  bus.route_relations.id as id,
-	         position_index,
-	         location,
-	         station_b_id
-	    from bus.route_relations
-	    join bus.stations ON bus.stations.id = bus.route_relations.station_b_id
-	    where direct_route_id = _from_droute_id and position_index >= _start_index
-	    order by position_index
-        ) as table1
-        ,
-    (select  bus.route_relations.id as id,
-             position_index,
-             location, 
-             station_a_id
-        from bus.route_relations
-	    join bus.stations ON bus.stations.id = bus.route_relations.station_a_id
-        where direct_route_id = _to_droute_id
-	    order by position_index
-        ) as table2
-   WHERE  ST_DWithin(table1.location, table2.location,bus._MAX_TRANSITION_DISTANCE())
-         AND    bus._is_has_transition(table1.id,table2.id, bus._MAX_TRANSITION_DISTANCE()/2.0)
-   LIMIT 1            
- LOOP
- END LOOP;
- return _r;
-END;
-$BODY$
-LANGUAGE plpgsql IMMUTABLE;
 
 --==========================================================================================================================  
 
@@ -335,27 +590,7 @@ END;
 $BODY$
 LANGUAGE plpgsql IMMUTABLE;
 
-CREATE OR REPLACE FUNCTION bus.is_nearest_stations(_station_a_id bigint, _station_b_id bigint,distance double precision)
-RETURNS bool AS
-$BODY$
-DECLARE
- _distance double precision;
- p1 geography;
- p2 geography;
-BEGIN
- SELECT location INTO p1 FROM bus.stations where id = _station_a_id LIMIT 1;
- IF NOT FOUND THEN
-	return false;
- END IF;
- SELECT location INTO p2 FROM bus.stations where id = _station_b_id LIMIT 1;
- IF NOT FOUND THEN
-	return false;
- END IF;
 
- return ST_DWithin(p1, p2,distance);
-END;
-$BODY$
-LANGUAGE plpgsql IMMUTABLE;
 --===============================================================================================================
 
 CREATE OR REPLACE FUNCTION bus.get_distance_between_stations(_station_a_id bigint, _station_b_id bigint)
@@ -519,7 +754,7 @@ BEGIN
          WHERE id = bus.transport_type_enum('c_foot');
   
  -- Добавим дуги между узлами маршрута
-
+/*
  INSERT INTO bus._graph_relations (city_id,relation_a_id,
  relation_b_id,relation_b_type,wait_time,move_time,cost_money,cost_time,distance,is_transition)
  SELECT  
@@ -539,9 +774,9 @@ BEGIN
 	JOIN bus.direct_routes              ON r2.direct_route_id = direct_routes.id
 	JOIN bus.routes                     ON direct_routes.route_id = routes.id
  WHERE r1.direct_route_id = _direct_route_id and r2.direct_route_id = _direct_route_id ;
-
+*/
 -- Найдем дуги(переходы) между пересек. маршрутами
- FOR _r IN 
+ /*FOR _r IN 
    SELECT  table1.id as relation_a_id, 
            table2.id as relation_b_id, 
            bus.get_distance_between_stations(table1.station_b_id, table2.station_b_id) as distance
@@ -607,7 +842,7 @@ BEGIN
               JOIN bus.direct_routes         ON bus.direct_routes.id = r2.direct_route_id
               JOIN bus.routes                ON bus.routes.id = bus.direct_routes.route_id
 	          JOIN bus.time_routes           ON bus.routes.id = bus.time_routes.route_id;
-	
+	*/
 END;
 $BODY$
 LANGUAGE plpgsql VOLATILE;  
@@ -1685,7 +1920,9 @@ END;
 $BODY$   LANGUAGE plpgsql ;
 
  --========================CONSTANTS======================================	
+/*
 
+*/
 CREATE OR REPLACE FUNCTION bus._MAX_TRANSITION_DISTANCE()
 RETURNS double precision AS
 $BODY$
@@ -1705,6 +1942,293 @@ BEGIN
  return 5;
 END;
 $BODY$   LANGUAGE plpgsql  IMMUTABLE NOT LEAKPROOF;
+
+--================
+
+CREATE OR REPLACE FUNCTION bus._WALKING_SPEED()
+RETURNS integer AS
+$BODY$
+DECLARE
+ _foot_speed double precision;
+BEGIN
+ _foot_speed := 5; -- default value
+ SELECT ev_speed INTO _foot_speed  FROM bus.transport_types  
+         WHERE id = bus.transport_type_enum('c_foot');
+ return _foot_speed;
+END;
+$BODY$   LANGUAGE plpgsql  IMMUTABLE;
+
+--================== OLD ==================
+
+/*
+
+
+CREATE OR REPLACE FUNCTION bus._recurs_get_path_droutes(curr_node    bigint,
+													    _droutes bigint[]
+                                                     )
+ RETURNS bigint[] AS
+$BODY$
+DECLARE
+ _curr_rid bigint;
+ _parent_id bigint;
+BEGIN
+  SELECT curr_rid,parent_id INTO _curr_rid,_parent_id FROM  bus._droute_trees WHERE id = curr_node;
+  _droutes := array_append(_droutes,_curr_rid);
+  IF _parent_id IS NOT NULL THEN
+	_droutes := bus._recurs_get_path_droutes(_parent_id,_droutes);
+  END IF;
+  return _droutes;
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+                                                    
+--==========================================================================================================================  
+
+
+CREATE OR REPLACE FUNCTION bus._recurs_make_subpaths(curr_node    bus._droute_trees,
+													 curr_droutes bigint[],
+													 _city_id bigint
+                                                     )
+RETURNS void AS
+$BODY$
+DECLARE
+ _r          record;
+ new_node    bus._droute_trees;
+
+ transition   bus.route_transition;
+ _root_index  integer;
+ 
+BEGIN
+  curr_droutes :=  array_append(curr_droutes,curr_node.curr_rid);
+  RAISE NOTICE '%', curr_droutes;
+  FOR _r IN 
+     SELECT bus.direct_routes.id as droute_id  FROM bus.direct_routes
+     JOIN   bus.routes ON bus.routes.id = bus.direct_routes.route_id
+     LEFT JOIN bus._droute_trees ON bus._droute_trees.curr_rid = bus.direct_routes.id AND parent_id = curr_node.id
+     WHERE  city_id = _city_id AND
+            bus.direct_routes.id <> ANY(curr_droutes) AND
+            bus._droute_trees.id IS NULL AND 
+            bus.possible_route_transiton(curr_node.curr_rid,bus.direct_routes.id,curr_node.curr_index) = true
+  LOOP
+    transition:= bus.find_route_transiton(curr_node.curr_rid, _r.droute_id,curr_node.curr_index);
+    new_node.id                 := -1;
+    new_node.parent_id          := curr_node.id;
+    new_node.root_rid           := curr_node.root_rid;
+    new_node.root_index         := -1;
+    new_node.curr_rid           := _r.droute_id;
+    new_node.curr_index         := transition.index_b;
+    new_node.level              := curr_node.level + 1;
+    new_node.parent_relation_id := transition.route_relation_a_id;
+     
+    if curr_node.level = 0 then
+		new_node.root_index := transition.index_a;
+    else
+        new_node.root_index := curr_node.root_index;
+    end if;
+    
+	INSERT INTO bus._droute_trees (parent_id,root_rid,root_index,curr_rid,curr_index,level,parent_relation_id)
+			VALUES (new_node.parent_id,   -- parent_id
+			        new_node.root_rid,  -- root_rid
+			        new_node.root_index,  -- root_index
+			        new_node.curr_rid,    -- curr_rid
+			        new_node.curr_index,    -- curr_index
+			        new_node.level,            -- level
+			        new_node.parent_relation_id  -- parent_relation_id
+			        ) RETURNING id INTO new_node.id;
+    --RAISE NOTICE '%', new_node.level;
+	if new_node.level < 3 then
+		execute bus._recurs_make_subpaths(new_node,curr_droutes,_city_id);
+    end if;
+  END LOOP; 
+  
+  
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+
+CREATE OR REPLACE FUNCTION bus._make_subpaths(droute_id bigint, _city_id bigint)
+RETURNS void AS
+$BODY$
+DECLARE
+ _curr_node  bus._droute_trees%ROWTYPE;
+ droutes bigint[];
+BEGIN
+  FOR _curr_node IN 
+     SELECT * FROM  bus._droute_trees 
+     WHERE bus._droute_trees.curr_rid = droute_id AND level < bus._MAX_TREE_LEVEL()
+  LOOP
+     droutes := bus._recurs_get_path_droutes(_curr_node.id, droutes ) ;
+     EXECUTE bus._recurs_make_subpaths(_curr_node, droutes,_city_id);
+ 
+  END LOOP;
+
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+CREATE OR REPLACE FUNCTION bus.update_droute_trees(droute_id bigint)
+RETURNS void AS
+$BODY$
+DECLARE
+ _r  		  record;
+ _city_id     bigint;
+ _route_id    bigint;
+ transition   bus.route_transition;
+ _root_index  integer;
+BEGIN
+  -- Найдем id города, которому принадлежит текущий маршрут
+  SELECT bus.routes.city_id,bus.routes.id INTO _city_id,_route_id FROM bus.direct_routes
+       join bus.routes ON bus.routes.id = bus.direct_routes.route_id
+       where bus.direct_routes.id = droute_id LIMIT 1;
+ 
+  -- Удалим все ноды, соотв. текущему маршруту
+  DELETE FROM bus._droute_trees WHERE curr_rid = droute_id;
+  
+  -- Добавим корень дерева 
+  INSERT INTO bus._droute_trees (parent_id,root_rid,root_index,curr_rid,curr_index,level,parent_relation_id)
+			VALUES (NULL,droute_id,0,droute_id,0,0,NULL);
+ 
+  --Добавим ноды, соотв. текущему маршруту к тем родителям, с которых возможен переход на текущий маршрут   
+ FOR _r IN 
+     select bus._droute_trees.id               as node_id,
+			bus._droute_trees.root_rid         as root_rid,
+			bus._droute_trees.root_index       as root_index,
+			bus._droute_trees.curr_rid         as curr_rid,
+			bus._droute_trees.curr_rid         as curr_index,
+			bus._droute_trees.level            as level
+			
+			from bus._droute_trees
+		    join bus.direct_routes ON bus.direct_routes.id = bus._droute_trees.curr_rid
+			join bus.routes        ON bus.routes.id = bus.direct_routes.route_id
+			where city_id = _city_id and
+				level < bus._MAX_TREE_LEVEL() and
+				bus.routes.id <> _route_id and
+				bus.possible_route_transiton(curr_rid,droute_id,curr_index) = true
+LOOP
+    transition:= find_route_transiton(_r.curr_rid,droute_id,_r.curr_index);
+    if _r.level = 0 then
+		_root_index := transition.index_a;
+    else
+       _root_index  := _r.root_index;
+    end if;
+	INSERT INTO bus._droute_trees (parent_id,root_rid,root_index,curr_rid,curr_index,level,parent_relation_id)
+			VALUES (_r.node_id,   -- parent_id
+			        _r.root_rid,  -- root_rid
+			        _root_index,  -- root_index
+			        droute_id,    -- curr_rid
+			        transition.index_b,    -- curr_index
+			        _r.level+1,            -- level
+			        transition.route_relation_a_id  -- parent_relation_id
+			        );
+ 
+
+END LOOP;
+  -- Создадим поддеревья, корнями для которых являются ноды, соотв. текущему маршруту 
+  EXECUTE bus._make_subpaths(droute_id,_city_id);
+
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+
+--==========================================================================================================================  
+
+CREATE OR REPLACE FUNCTION bus.possible_route_transiton( _from_droute_id  bigint, 
+                                                    _to_droute_id    bigint,
+                                                    _start_index     integer
+                                                    )
+RETURNS bool AS
+$BODY$
+DECLARE
+ _r bus.route_transition;
+ r1_id bigint;
+ r2_id bigint;
+BEGIN   
+  SELECT bus.direct_routes.route_id INTO r1_id FROM bus.direct_routes where id = _from_droute_id LIMIT 1;
+  SELECT bus.direct_routes.route_id INTO r2_id FROM bus.direct_routes where id = _to_droute_id LIMIT 1;
+  if r1_id = r2_id then
+    return false;
+  end if;
+  _r :=  bus.find_route_transiton(_from_droute_id,_to_droute_id,_start_index);
+  if _r IS NULL THEN
+    return false;
+  END IF;
+  return true;
+END;
+$BODY$
+LANGUAGE plpgsql IMMUTABLE;
+                                              
+--==========================================================================================================================  
+/*
+  Функция get_route_transiton ищет первый возможый переход с маршрута _from_droute_id на 
+  маршрут _to_droute_id, начиная с дуги первого маршрута, индекс которой равен _start_index.
+  
+  @_from_droute_id Id маршрута, для которого ищем переход на маршрут _to_droute_id
+  @_to_droute_id Id машршрута, на который возможен переход с маршрута _from_droute_id
+  @_start_index Индекс дуги маршута droute1_id, с которой начинаем поиск перехода на droute2_id
+  @return Возвращает первый найденный переход
+*/
+CREATE OR REPLACE FUNCTION bus.find_route_transiton( _from_droute_id  bigint, 
+                                                    _to_droute_id    bigint,
+                                                    _start_index     integer
+                                                    )
+RETURNS bus.route_transition AS
+$BODY$
+DECLARE
+ _r bus.route_transition;
+BEGIN
+-- Найдем дуги(переходы) между пересек. маршрутами
+ FOR _r IN 
+   SELECT  
+           table1.id as route_relation_a_id, 
+           table2.id as route_relation_b_id, 
+           table1.position_index as index_a,
+           table2.position_index as index_b,
+           st_distance(table1.location, table2.location) as distance
+   FROM  
+	(select  bus.route_relations.id as id,
+	         position_index,
+	         location,
+	         station_b_id
+	    from bus.route_relations
+	    join bus.stations ON bus.stations.id = bus.route_relations.station_b_id
+	    where direct_route_id = _from_droute_id and position_index >= _start_index
+	    order by position_index
+        ) as table1
+        ,
+    (select  bus.route_relations.id as id,
+             position_index,
+             location, 
+             station_a_id
+        from bus.route_relations
+	    join bus.stations ON bus.stations.id = bus.route_relations.station_a_id
+        where direct_route_id = _to_droute_id
+	    order by position_index
+        ) as table2
+   WHERE  ST_DWithin(table1.location, table2.location,bus._MAX_TRANSITION_DISTANCE())
+         AND    bus._is_has_transition(table1.id,table2.id, bus._MAX_TRANSITION_DISTANCE()/2.0)
+   LIMIT 1            
+ LOOP
+ END LOOP;
+ return _r;
+END;
+$BODY$
+LANGUAGE plpgsql IMMUTABLE;
+
+
+*/
+
+
+
+
+
+
+
+
+
 
 
 

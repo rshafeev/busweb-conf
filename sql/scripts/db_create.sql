@@ -324,27 +324,6 @@ WITH (
   OIDS=FALSE
 );
 
---===============
-
-CREATE TABLE bus.station_transports
-(
-  station_id 		    bigint 			            NOT NULL,
-  transport_type_id 	bus.transport_type_enum     NOT NULL,
-  
-  CONSTRAINT station_transport_pk PRIMARY KEY (station_id,transport_type_id),
-
-  CONSTRAINT station_trasnport_nid_fk FOREIGN KEY (station_id)
-      REFERENCES bus.stations (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE CASCADE,
-      
-  CONSTRAINT station_trasnport_ttid_fk FOREIGN KEY (transport_type_id)
-      REFERENCES bus.transport_types (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE CASCADE    
-)
-WITH (
-  OIDS=FALSE
-);
-
 --================
 
 CREATE TABLE bus.routes
@@ -474,59 +453,166 @@ CREATE TABLE bus.timetable
       ON UPDATE CASCADE ON DELETE CASCADE            
 );
 
---================
+
+--================ Переходы между маршрутами
 CREATE TABLE bus.route_transitions
 (
-  id                  bigserial 	       NOT NULL,
-  route_relation_a_id bigint 	           NOT NULL,
-  route_relation_b_id bigint 	           NOT NULL,
-  index_a             integer              NOT NULL,
-  index_b             integer              NOT NULL,
-  distance            double precision 	   NOT NULL,
- 
+   id  			          bigserial 			 NOT NULL,
+   route_relation_a_id    bigint                 NOT NULL,
+   route_relation_b_id    bigint                 NOT NULL,
+   disatnce               double precision       NOT NULL,
+   move_time              interval               NOT NULL,
+   cost                   double precision       NOT NULL,
+    
   CONSTRAINT route_transitions_pk PRIMARY KEY (id),
-
-  CONSTRAINT route_transitions_route_relation_a_id_fk FOREIGN KEY (route_relation_a_id)
-      REFERENCES bus.route_relations (id) MATCH SIMPLE
+  CONSTRAINT route_transitions_unique UNIQUE (route_relation_a_id,route_relation_b_id),
+  
+  CONSTRAINT route_transitions_station_a_id_fk FOREIGN KEY (route_relation_a_id)
+      REFERENCES bus.route_transitions (id) MATCH SIMPLE
       ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
-  
-  CONSTRAINT route_transitions_route_relation_b_id_fk FOREIGN KEY (route_relation_b_id)
-      REFERENCES bus.route_relations (id) MATCH SIMPLE
+
+  CONSTRAINT route_transitions_station_b_id_fk FOREIGN KEY (route_relation_b_id)
+      REFERENCES bus.route_transitions (id) MATCH SIMPLE
       ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
-  
+   	
 );
+
+
+--================ Переходы между станциями
+CREATE TABLE bus.station_transitions
+(
+   id  			   bigserial 			  NOT NULL,
+   station_a_id    bigint                 NOT NULL,
+   station_b_id    bigint                 NOT NULL,
+   distance        double precision       NOT NULL,
+   move_time       interval               NOT NULL,
+   is_manual       bool                   NOT NULL, -- создано админом или автоматически с помощью функции update_station_transitions(station_id)
+  
+  CONSTRAINT station_transitions_pk PRIMARY KEY (id),
+  CONSTRAINT station_transitions_unique UNIQUE (station_a_id,station_b_id),
+  
+  CONSTRAINT station_transitions_station_a_id_fk FOREIGN KEY (station_a_id)
+      REFERENCES bus.stations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+
+  CONSTRAINT station_transitions_station_b_id_fk FOREIGN KEY (station_b_id)
+      REFERENCES bus.stations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+   
+);
+
 --================
-CREATE TABLE bus.graph_relations
+CREATE TABLE bus._graph_nodes
+(
+  id 				  bigserial        	    NOT NULL,
+  station_id          bigint                NOT NULL,
+  route_relation_id   bigint,
+  
+  CONSTRAINT _graph_nodes_pk PRIMARY KEY (id),
+  CONSTRAINT _graph_nodes_relation_unique UNIQUE (route_relation_id),
+  
+  CONSTRAINT _graph_node_station_id_fk FOREIGN KEY (station_id)
+      REFERENCES bus.stations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE,
+
+  CONSTRAINT _graph_node_relation_id_fk FOREIGN KEY (route_relation_id)
+      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE
+        
+);
+
+--================
+-- Таблица хранения графа по опред. городу. Является избыточной информацией, но необходимой
+-- для быстрого формирования графа при поиске кратчайших путей
+CREATE TABLE bus._graph_relations
 (
   id 				  bigserial        	    NOT NULL,
   city_id 		      bigint 				NOT NULL,
-  route_type_id       bus.route_type_enum   NOT NULL,
+  node_a_id           bigint 				NOT NULL,
+  node_b_id           bigint 				NOT NULL,
+  route_relation_id   bigint,
   relation_type       bus.route_type_enum   NOT NULL,
-  relation_a_id       integer 				NOT NULL,
-  relation_b_id       integer 				NOT NULL,
-  time_A              time 				    ,
-  time_B              time 				    ,
-  day_id              bus.day_enum 				NOT NULL,
   move_time           interval   			NOT NULL,
   wait_time           interval   			NOT NULL,
   cost_money          double precision 		NOT NULL,
   cost_time           double precision      NOT NULL,
   distance            double precision      NOT NULL,
   
-  CONSTRAINT graph_relations_pk PRIMARY KEY (id),
-
-  CONSTRAINT graph_relations_city_id_fk FOREIGN KEY (city_id)
+  CONSTRAINT _graph_relations_pk PRIMARY KEY (id),
+  CONSTRAINT _graph_relations_modes_unique UNIQUE (node_a_id,node_b_id),
+  
+  CONSTRAINT _graph_relations_city_id_fk FOREIGN KEY (city_id)
       REFERENCES bus.cities (id) MATCH SIMPLE
       ON UPDATE CASCADE ON DELETE CASCADE,
-  CONSTRAINT graph_relations_relation_a_id_fk FOREIGN KEY (relation_a_id)
+  
+  CONSTRAINT _graph_relations_route_relation_id_fk FOREIGN KEY (route_relation_id)
       REFERENCES bus.route_relations (id) MATCH SIMPLE
       ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
-   CONSTRAINT graph_relations_relation_b_id_fk FOREIGN KEY (relation_b_id)
-      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      
+  CONSTRAINT _graph_relations_node_a_id_fk FOREIGN KEY (node_a_id)
+      REFERENCES bus._graph_nodes (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+  
+  CONSTRAINT _graph_relations_node_b_id_fk FOREIGN KEY (node_b_id)
+      REFERENCES bus._graph_nodes (id) MATCH SIMPLE
       ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
   
 
 );
+
+--================
+CREATE TABLE bus.import_objects
+(
+  id			bigserial 			 NOT NULL,
+  city_key   	text    			 NOT NULL,
+  route_type    bus.route_type_enum  NOT NULL,
+  route_number  text                 NOT NULL,
+  obj           text         		 NOT NULL,
+ 
+ CONSTRAINT import_objectss_pk PRIMARY KEY (id)
+);
+
+--================
+
+/*CREATE TABLE bus._graph_relations
+(
+  id 				  bigserial        	    NOT NULL,
+  city_id 		      bigint 				NOT NULL,
+  relation_a_id       integer 				NOT NULL,
+  relation_b_id       integer 				NOT NULL,
+  relation_b_type     bus.route_type_enum   NOT NULL,
+  move_time           interval   			NOT NULL,
+  wait_time           interval   			NOT NULL,
+  cost_money          double precision 		NOT NULL,
+  cost_time           double precision      NOT NULL,
+  distance            double precision      NOT NULL,
+  is_transition       boolean                NOT NULL,
+  CONSTRAINT _graph_relations_pk PRIMARY KEY (id),
+
+  CONSTRAINT _graph_relations_city_id_fk FOREIGN KEY (city_id)
+      REFERENCES bus.cities (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT _graph_relations_relation_a_id_fk FOREIGN KEY (relation_a_id)
+      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+   CONSTRAINT _graph_relations_relation_b_id_fk FOREIGN KEY (relation_b_id)
+      REFERENCES bus.route_relations (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+  
+
+);*/
+
+/*
+
+select row_number() over (order by t1.id) as id, 
+t1.id as relation_A, t2.id as relation_B,t1.direct_route_id as direct_route_A,t2.direct_route_id as direct_route_B
+   FROM bus.route_stations as t1
+   JOIN ( SELECT * FROM bus.route_stations) t2 ON t1.station_b_id = t2.station_a_id;
+*/
+
+
+/*
+
 --================
 CREATE TABLE bus._droute_trees
 (
@@ -561,61 +647,6 @@ CREATE TABLE bus._droute_trees
       ON UPDATE SET NULL ON DELETE SET NULL
        
 );
---================
-CREATE TABLE bus._graph_relations
-(
-  id 				  bigserial        	    NOT NULL,
-  city_id 		      bigint 				NOT NULL,
-  relation_a_id       integer 				NOT NULL,
-  relation_b_id       integer 				NOT NULL,
-  relation_b_type     bus.route_type_enum   NOT NULL,
-  move_time           interval   			NOT NULL,
-  wait_time           interval   			NOT NULL,
-  cost_money          double precision 		NOT NULL,
-  cost_time           double precision      NOT NULL,
-  distance            double precision      NOT NULL,
-  is_transition       boolean                NOT NULL,
-  CONSTRAINT _graph_relations_pk PRIMARY KEY (id),
-
-  CONSTRAINT _graph_relations_city_id_fk FOREIGN KEY (city_id)
-      REFERENCES bus.cities (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE CASCADE,
-  CONSTRAINT _graph_relations_relation_a_id_fk FOREIGN KEY (relation_a_id)
-      REFERENCES bus.route_relations (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
-   CONSTRAINT _graph_relations_relation_b_id_fk FOREIGN KEY (relation_b_id)
-      REFERENCES bus.route_relations (id) MATCH SIMPLE
-      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
-  
-
-);
---================
-CREATE TABLE bus.import_objects
-(
-  id			bigserial 			 NOT NULL,
-  city_key   	text    			 NOT NULL,
-  route_type    bus.route_type_enum  NOT NULL,
-  route_number  text                 NOT NULL,
-  obj           text         		 NOT NULL,
- 
- CONSTRAINT import_objectss_pk PRIMARY KEY (id)
-);
-
---================
-
-
-/*
-
-select row_number() over (order by t1.id) as id, 
-t1.id as relation_A, t2.id as relation_B,t1.direct_route_id as direct_route_A,t2.direct_route_id as direct_route_B
-   FROM bus.route_stations as t1
-   JOIN ( SELECT * FROM bus.route_stations) t2 ON t1.station_b_id = t2.station_a_id;
-*/
-
-
-/*
-
-
 --######################################
 
 CREATE TABLE bus.discounts
