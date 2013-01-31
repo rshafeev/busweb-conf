@@ -75,7 +75,9 @@ PathsContainer DijkstraPathFinder::findShPaths(int startVertexID, int endVertexI
         return paths;
     }
     if(shortestPath->check()==true){
+        for(int i=0;i < 1; i++){
         paths.addPath(shortestPath);
+        }
     }
     std::shared_ptr<BoostPath> minPath = shortestPath;
     vector<edge_t> delete_edges;

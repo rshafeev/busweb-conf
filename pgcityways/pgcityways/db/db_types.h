@@ -11,6 +11,7 @@ typedef struct edge_columns
     int cost;
     int is_transition;
     int reverse_cost;
+    int route_id;
 } edge_columns_t;
 
 
@@ -21,6 +22,7 @@ typedef struct edge
     int target;
     float8 cost;
     bool is_transition;
+    int route_id;
    // float8 reverse_cost;
 } edge_t;
 

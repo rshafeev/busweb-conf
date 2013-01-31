@@ -21,7 +21,7 @@ int boost_dijkstra(edge_t *edges, unsigned int count, int start_vertex, int end_
     graphData->hasReverseCost = has_reverse_cost;
     std::shared_ptr<Graph> graph = std::shared_ptr<Graph>(new Graph(graphData));
     IPathFinder *finder = new DijkstraPathFinder(graph);
-    paths_t paths_result = finder->findShortestPaths(start_vertex,end_vertex,3);
+    paths_t paths_result = finder->findShortestPaths(start_vertex,end_vertex,25);
     delete finder;
     *paths =  paths_result.arr;
     *path_count = paths_result.count;

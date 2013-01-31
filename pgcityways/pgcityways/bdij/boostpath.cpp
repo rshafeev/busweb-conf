@@ -34,6 +34,7 @@ bool BoostPath::getEdge(edge_t &edge)
 
 bool BoostPath::check()
 {
+    return true;
     std::vector<int>& path_vect = this->getVertexes();
     pgDebug("Check:");
     for(int i=path_vect.size()-1; i >=2; i--){
