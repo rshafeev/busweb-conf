@@ -1,4 +1,1253 @@
 ﻿
+--==========================================================================================================================  
+CREATE OR REPLACE FUNCTION bus._path_weight(m_cost_time interval, 
+                                            m_cost_money double precision,
+                                            m_alg_strategy bus.alg_strategy)
+RETURNS double precision AS
+$BODY$
+DECLARE
+  m_move_time interval;
+BEGIN
+  case when m_alg_strategy = bus.alg_strategy('c_time') then return bus.interval_to_double(m_cost_time);
+       when m_alg_strategy = bus.alg_strategy('c_cost') then return bus.interval_to_double(m_cost_time)/400.0 + m_cost_money;
+       else return bus.interval_to_double(m_cost_time)/150.0 + m_cost_money;
+  end case;       
+END;
+$BODY$
+  LANGUAGE plpgsql IMMUTABLE;	
+
+--==========================================================================================================================  
+CREATE OR REPLACE FUNCTION bus.droute_distance(m_droute_id bigint, 
+                                                m_start_index integer,
+                                                m_finish_index integer)
+RETURNS double precision AS
+$BODY$
+DECLARE
+  m_distance double precision;
+BEGIN
+ select sum(distance) into m_distance from bus.route_relations 
+ where direct_route_id = m_droute_id and 
+       position_index >= m_start_index and 
+       position_index <= m_finish_index; 
+ return m_distance;
+END;
+$BODY$
+  LANGUAGE plpgsql IMMUTABLE;	
+    
+--==========================================================================================================================  
+
+CREATE OR REPLACE FUNCTION bus.droute_move_time(m_droute_id bigint, 
+                                                m_start_index integer,
+                                                m_finish_index integer)
+RETURNS interval AS
+$BODY$
+DECLARE
+  m_move_time interval;
+BEGIN
+ select sum(ev_time) into m_move_time from bus.route_relations 
+ where direct_route_id = m_droute_id and 
+       position_index >= m_start_index and 
+       position_index <= m_finish_index; 
+ return m_move_time + bus._STATION_TIME_PAUSE() * (m_finish_index - m_start_index) ;
+END;
+$BODY$
+  LANGUAGE plpgsql IMMUTABLE;	
+  
+--==========================================================================================================================  
+CREATE OR REPLACE FUNCTION bus.next_day(m_day_id bus.day_enum)
+RETURNS bus.day_enum AS
+$BODY$
+DECLARE
+BEGIN
+
+  case when m_day_id = bus.day_enum('c_Sunday') then return bus.day_enum('c_Monday');
+       when m_day_id = bus.day_enum('c_Monday') then return bus.day_enum('c_Tuesday');
+       when m_day_id = bus.day_enum('c_Tuesday') then return bus.day_enum('c_Wednesday');
+       when m_day_id = bus.day_enum('c_Wednesday') then return bus.day_enum('c_Thursday');
+       when m_day_id = bus.day_enum('c_Thursday') then return bus.day_enum('c_Friday');
+       when m_day_id = bus.day_enum('c_Friday') then return bus.day_enum('c_Saturday');
+       when m_day_id = bus.day_enum('c_Saturday') then return bus.day_enum('c_Sunday');
+       else return bus.day_enum('c_all');
+  end case;
+       
+ 
+END;
+$BODY$
+  LANGUAGE plpgsql IMMUTABLE;	
+  
+--==========================================================================================================================  
+CREATE OR REPLACE FUNCTION bus.droute_wait_time(m_droute_id bigint,
+                                                m_day_id bus.day_enum,
+                                                m_input_time  	time)
+RETURNS interval AS
+$BODY$
+DECLARE
+  m_wait_time interval;
+BEGIN
+ --raise notice '%,%,%',m_droute_id,m_day_id, m_input_time;
+ -- Если время перевалило на след. день, тогда ищем интервал по след. дню
+ if (m_input_time > time '24:00:00') then
+   m_input_time := m_input_time - time '24:00:00'; 
+   m_day_id := bus.next_day(m_day_id);
+ end if;
+ select frequency/2.0 into m_wait_time from bus.schedule
+ join bus.schedule_groups     on bus.schedule_groups.schedule_id = bus.schedule.id
+ join bus.schedule_group_days on bus.schedule_group_days.schedule_group_id = bus.schedule_groups.id and
+                                 (day_id = m_day_id or day_id = bus.day_enum('c_all'))
+ join bus.timetable           on bus.timetable.schedule_group_id = bus.schedule_groups.id
+ where schedule.direct_route_id = m_droute_id and time_a <= m_input_time and time_b>= m_input_time limit 1;
+ 
+ if (m_wait_time is null) then
+    select min(time_a)   into m_wait_time from bus.schedule
+	join bus.schedule_groups     on bus.schedule_groups.schedule_id = bus.schedule.id
+	join bus.schedule_group_days on bus.schedule_group_days.schedule_group_id = bus.schedule_groups.id and
+                                 (day_id = m_day_id or day_id = bus.day_enum('c_all'))
+	join bus.timetable           on bus.timetable.schedule_group_id = bus.schedule_groups.id
+	where schedule.direct_route_id = m_droute_id and time_a > m_input_time limit 1;
+	m_wait_time := m_wait_time - m_input_time; 
+ end if;
+ return m_wait_time;
+END;
+$BODY$
+  LANGUAGE plpgsql IMMUTABLE;	
+--==========================================================================================================================  
+
+  CREATE OR REPLACE FUNCTION bus.find_shortest_paths(	_city_id  	bigint,
+							_p1 		geography,
+							_p2 		geography,
+							m_day_id 	bus.day_enum,
+							m_time_start  	time,
+					        _max_distance 	double precision,
+					        _route_types 	text[],
+					        _discounts      double precision[],
+					        m_alg_strategy   bus.alg_strategy,
+					        _lang_id        bus.lang_enum)
+RETURNS SETOF bus.path_t AS
+$BODY$
+DECLARE
+ _nearest_relation      bus.nearest_relation%ROWTYPE;
+ relations_A 		    bus.nearest_relation[];
+ relations_B 		    bus.nearest_relation[];
+ query 			text;
+ i 			integer;
+ j 			integer;
+ k                      integer;
+ m_count  integer;
+ _relation_input_id     integer;  -- id of bus.route_relations row, which of route type is 'c_route_station_input'
+
+ _curr_filter_path	bus.filter_path%ROWTYPE;
+ _prev_filter_path	bus.filter_path;
+ _temp_filter_path	bus.filter_path;
+ _move_time             interval;
+ _distance              double precision;
+ _paths                 bus.filter_path[];
+ _way_elem              bus.way_elem%ROWTYPE;
+ _id_arr                integer[];
+ _id                    integer;
+ _start_id              integer;
+ _finish_id             integer;
+ _r                     record;
+ 
+ m_rec                  record;
+ m_fix_time             timestamptz;
+ m_path_id              integer;
+ m_path_elem            bus.path_t;
+ m_move_time_a          interval;
+ m_move_time_b          interval;
+ m_move_time_c          interval;
+ m_move_time_d          interval;
+ 
+ m_wait_time_a          interval;
+ m_wait_time_b          interval;
+ m_wait_time_c          interval;
+ m_wait_time_d          interval;
+ m_move_time            time;
+BEGIN
+   m_fix_time := clock_timestamp();
+  
+  -- создадим временную таблицу  use_routes(id,discount) используемых типов маршрутов и 
+  -- скидки по каждому в процентном эквиваленте(от 0 до 1)
+  CREATE TEMPORARY  TABLE temp_use_routes  ON COMMIT DROP AS
+    SELECT route_type as id,discount FROM 
+	(select row_number() over (ORDER BY (select 0)) as id, unnest::bus.route_type_enum as route_type from 
+		unnest( _route_types)
+	) as route_types
+    JOIN
+    ( select row_number() over (ORDER BY (select 0)) as id, unnest as discount from 
+                unnest( _discounts)
+    ) as discounts
+    ON discounts.id =  route_types.id;
+
+
+ -- Хранит части маршрутов без пересадок
+  CREATE TEMPORARY  TABLE droutes_zero(
+		id 				bigint,
+		droute_id       bigint,
+		rindex          integer,
+		walk_distance   double precision,
+		walk_time       interval,
+		droute_cost     double precision,
+		level           integer
+  )ON COMMIT DROP;
+	
+  -- Хранит части маршрутов без пересадок	
+  CREATE TEMPORARY  TABLE droutes_one(
+		id 				bigint,
+		droute_a_id     bigint,
+		droute_b_id     bigint,
+		rindex_start_a  integer,
+		rindex_finish_a integer,
+		rindex_start_b  integer,
+		rindex_finish_b integer,
+		walk_distance   double precision,
+		walk_time       interval,
+		wait_time_a     interval,
+		wait_time_b     interval,
+		trans_distance  double precision,
+		trans_time      interval,
+		droute_cost_a   double precision,
+		droute_cost_b   double precision,
+		level           integer,
+		weight          double precision
+  )ON COMMIT DROP;
+    
+  -- Найдем ближайшие дуги от начальной точки назначения и сохраним их во временную таблицу  nearest_relations
+  insert into droutes_zero(id,droute_id,rindex,walk_distance,walk_time,droute_cost,level)
+    (select   row_number() over (ORDER BY (select 0))   		      			   as id,
+              relations.droute_id 										  		   as droute_id,
+              relations.rindex 											           as rindex,
+              relations.distance                                                   as walk_distance,
+              bus.get_walking_move_time(relations.distance)                        as walk_time,
+              discount * cost                    								   as droute_cost,
+              1                                                                    as level
+               
+		from bus.find_nearest_relations(_p1, _city_id, _max_distance) as relations
+		join bus.direct_routes   on direct_routes.id = relations.droute_id 
+		join bus.routes          on routes.id = direct_routes.route_id 
+		join temp_use_routes     on temp_use_routes.id = routes.route_type_id);                           
+    
+  select max(id) into i from droutes_zero;  
+    
+  insert into droutes_zero(id,droute_id,rindex,walk_distance,walk_time,droute_cost,level)
+    (select   row_number() over (ORDER BY (select 0)) + i 		      			   as id,
+              relations.droute_id 										  		   as droute_id,
+              relations.rindex 											           as rindex,
+              relations.distance                                                   as walk_distance,
+              bus.get_walking_move_time(relations.distance)                        as walk_time,
+              discount * cost                    								   as droute_cost,
+              4		 														       as level												   
+		from bus.find_nearest_relations(_p2, _city_id, _max_distance) as relations
+		join bus.direct_routes   on direct_routes.id = relations.droute_id 
+		join bus.routes          on routes.id = direct_routes.route_id 
+		join temp_use_routes     on temp_use_routes.id = routes.route_type_id);                          
+  
+   	CREATE TEMPORARY TABLE paths(
+	    path_id         integer,
+	    ind             integer,
+	    droute_id       bigint,
+	    index_start     integer,
+	    index_finish    integer,
+	    move_time       interval,
+	    wait_time       interval,
+	    cost            double precision,
+	    distance        double precision,
+	    weight     double precision
+	) ON COMMIT DROP;
+	
+	-- Найдем маршруты без пересадок
+    m_path_id := 1;
+    for m_rec in select * from (select t1.droute_id 			    as	droute_id ,
+									   t1.rindex 				    as	index_start,
+									   t2.rindex      		        as	index_finish,
+									   t1.walk_distance 			as distance_a,
+									   t1.walk_time 				as walk_time_a,   
+									   t2.walk_distance 			as distance_b,
+									   t2.walk_time 				as walk_time_b,
+									   t1.droute_cost               as cost,
+									   bus.droute_wait_time(t1.droute_id,m_day_id,m_time_start + t1.walk_time) as wait_time
+							    from droutes_zero as t1
+							    join droutes_zero as t2 on t1.level = 1 and t2.level = 4 and t2.droute_id = t1.droute_id and 
+							                               t1.rindex < t2.rindex
+							   )  as t3
+                where t3.wait_time is not null
+    loop
+      /*
+      Если wait_time вычислять здесь, то зафиксировано незначительное увеличение быстродействия (~0.01 сек)
+      */
+       insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 1, m_rec.walk_time_a, m_rec.distance_a,bus._path_weight(m_rec.walk_time_a,0.0,m_alg_strategy));
+      
+	   insert into paths(path_id,ind,droute_id,index_start,index_finish,move_time,wait_time,cost,distance,weight)
+				values(m_path_id, 
+						2, 
+						m_rec.droute_id,
+						m_rec.index_start,
+						m_rec.index_finish,
+						bus.droute_move_time(m_rec.droute_id,m_rec.index_start,m_rec.index_finish),
+						m_rec.wait_time,
+						m_rec.cost,
+						bus.droute_distance(m_rec.droute_id,m_rec.index_start,m_rec.index_finish),
+						bus._path_weight(bus.droute_move_time(m_rec.droute_id,m_rec.index_start,m_rec.index_finish) + 
+										 m_rec.wait_time,m_rec.cost,m_alg_strategy));
+       insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 3, m_rec.walk_time_b, m_rec.distance_b,bus._path_weight(m_rec.walk_time_b,0.0,m_alg_strategy));
+            
+       m_path_id := m_path_id + 1;
+     --  raise notice '%', m_rec;
+    end loop;
+
+				
+					
+  -- Добавим level = 2
+  insert into droutes_one(droute_a_id,droute_b_id,rindex_start_a,rindex_finish_a,
+                          rindex_start_b, walk_distance,walk_time,
+                          trans_distance,trans_time,droute_cost_a,droute_cost_b,level,wait_time_a,wait_time_b,weight)
+  (select droute_a_id,droute_b_id,rindex_start_a,rindex_finish_a,
+          rindex_start_b, walk_distance,walk_time,
+          trans_distance,trans_time,droute_cost_a,droute_cost_b,level,
+          wait_time_a,wait_time_b,
+          bus._path_weight(t1.walk_time + 
+                           t1.wait_time_a +
+                           t1.move_time_a + 
+                           trans_time +
+                           t1.wait_time_b, 
+                           droute_cost_a + droute_cost_b,
+                           m_alg_strategy) as weight	 
+   from                       
+    (select   droutes_zero.droute_id 						 as droute_a_id,
+              bus.route_transitions.droute_b_id 			 as droute_b_id,
+              droutes_zero.rindex       					 as rindex_start_a,
+              bus.route_transitions.from_index_a_id		     as rindex_finish_a,
+              bus.route_transitions.to_index_b_id 			 as rindex_start_b,
+              droutes_zero.walk_distance                     as walk_distance,
+              droutes_zero.walk_time                         as walk_time,
+              bus.route_transitions.transition_distance     as trans_distance,
+              bus.route_transitions.transition_time         as trans_time,
+			  droutes_zero.droute_cost                   	 as droute_cost_a,
+			  bus.routes.cost * temp_use_routes.discount * bus.route_transitions.transition_discount     as droute_cost_b,
+              2                                              as level,
+              time_droutes1.freq/2.0 as wait_time_a,
+              time_droutes2.freq/2.0 as wait_time_b,
+              bus.droute_move_time(droute_a_id,droutes_zero.rindex,bus.route_transitions.from_index_a_id) as move_time_a
+      from droutes_zero
+		join bus.route_transitions        on     bus.route_transitions.droute_a_id = droutes_zero.droute_id and 
+		                                  bus.route_transitions.from_index_a_id > droutes_zero.rindex
+		join bus.direct_routes            on direct_routes.id = bus.route_transitions.droute_b_id
+		join bus.routes                   on routes.id = direct_routes.route_id 
+		join temp_use_routes              on temp_use_routes.id = routes.route_type_id 
+		join bus.view_time_droutes     as time_droutes1   on time_droutes1.droute_id =  droutes_zero.droute_id and 
+		                                           time_droutes1.time_b >= m_time_start 
+		join bus.view_time_droutes     as time_droutes2   on time_droutes2.droute_id =  bus.route_transitions.droute_b_id and
+		                                           time_droutes2.time_b >= m_time_start 
+		where level = 1
+	) as t1
+  );
+  
+
+  -- Найдем маршруты с 1-й пересадкой
+  for m_rec in  select * from 
+				(select * ,min(table_weight_paths.weight) OVER (PARTITION BY droute_a_id,droute_b_id) as weight_min from 
+					(select *,
+							table_paths.w + bus._path_weight( move_time_b + walk_time_b ,0,m_alg_strategy) as weight
+					 from ( select  t1.droute_a_id              as  droute_a_id,
+									t1.droute_b_id 			    as	droute_b_id ,
+									t1.rindex_start_a 		    as	rindex_start_a,
+									t1.rindex_finish_a	        as	rindex_finish_a,
+									t1.rindex_start_b	        as	rindex_start_b,
+									t2.rindex                   as  rindex_finish_b,
+									t1.walk_distance 			as distance_a,
+									t1.walk_time 				as walk_time_a,
+									t1.trans_distance           as trans_distance,
+									t1.trans_time               as trans_time,
+									t2.walk_distance 			as distance_b,
+									t2.walk_time 				as walk_time_b,
+									t1.droute_cost_a            as cost_a,
+									t1.droute_cost_b            as cost_b,
+						            bus.droute_move_time(t1.droute_b_id,t1.rindex_start_b,t2.rindex) as move_time_b,
+						            t1.weight                   as w
+							from droutes_one  as t1
+							join droutes_zero as t2  on t1.level = 2 and t2.level = 4 and t1.droute_b_id =  t2.droute_id and
+                                          t1.rindex_start_b < t2.rindex 
+                   	) as table_paths
+         			) as table_weight_paths
+				) as table_result
+				where weight = weight_min
+				order by weight limit 35
+  loop
+	   m_wait_time_a := bus.droute_wait_time(m_rec.droute_a_id,m_day_id,m_time_start + m_rec.walk_time_a);
+	   continue when m_wait_time_a is null;
+	   m_move_time_a := bus.droute_move_time(m_rec.droute_a_id,m_rec.rindex_start_a,m_rec.rindex_finish_a);
+       m_wait_time_b := bus.droute_wait_time(m_rec.droute_a_id,m_day_id,m_time_start + m_rec.walk_time_a + 
+                                             m_move_time_a + m_rec.trans_time);
+	   continue when m_wait_time_b is null;
+	   
+       
+       insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 1, m_rec.walk_time_a, m_rec.distance_a,
+				bus._path_weight(m_rec.walk_time_a,0.0,m_alg_strategy));
+       
+       insert into paths(path_id,ind,droute_id,index_start,index_finish,move_time,wait_time,cost,distance,weight)
+				values(m_path_id, 
+						2, 
+						m_rec.droute_a_id,
+						m_rec.rindex_start_a,
+						m_rec.rindex_finish_a,
+						m_move_time_a,
+						m_wait_time_a,
+						m_rec.cost_a,
+						bus.droute_distance(m_rec.droute_a_id,m_rec.rindex_start_a,m_rec.rindex_finish_a),
+						bus._path_weight(m_move_time_a + m_wait_time_a,m_rec.cost_a,m_alg_strategy));
+       
+       insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 3, m_rec.trans_time, m_rec.trans_distance,
+				 bus._path_weight(m_rec.trans_time,0.0,m_alg_strategy));
+	   
+	   insert into paths(path_id,ind,droute_id,index_start,index_finish,move_time,wait_time,cost,distance,weight)
+				values(m_path_id, 
+						4, 
+						m_rec.droute_b_id,
+						m_rec.rindex_start_b,
+						m_rec.rindex_finish_b,
+						m_rec.move_time_b,
+						m_wait_time_b,
+						m_rec.cost_b,
+						bus.droute_distance(m_rec.droute_b_id,m_rec.rindex_start_b,m_rec.rindex_finish_b),
+						bus._path_weight(m_rec.move_time_b + m_wait_time_b,m_rec.cost_b,m_alg_strategy));
+						
+	   insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 5, m_rec.walk_time_b, m_rec.distance_b,
+					   bus._path_weight(m_rec.walk_time_b,0.0,m_alg_strategy));
+       m_path_id := m_path_id + 1;
+       
+     --  raise notice '%', m_rec;
+  end loop;  
+  
+ -- Добавим level 3
+  insert into droutes_one(droute_a_id,droute_b_id,rindex_finish_a,
+                          rindex_start_b,rindex_finish_b, walk_distance,walk_time,
+                          trans_distance,trans_time,droute_cost_a,droute_cost_b,level,wait_time_a,wait_time_b,weight)
+  (select droute_a_id,droute_b_id,rindex_finish_a,
+          rindex_start_b,rindex_finish_b, walk_distance,walk_time,
+          trans_distance,trans_time,droute_cost_a,droute_cost_b,level,
+          wait_time_a,wait_time_b,
+          bus._path_weight(
+                           trans_time +
+                           t1.wait_time_b + 
+                           t1.move_time_b + 
+                           t1.walk_time,
+                           droute_cost_b,
+                           m_alg_strategy) as weight	 
+    from
+    (select   bus.route_transitions.droute_a_id              as droute_a_id,
+              bus.route_transitions.droute_b_id 			 as droute_b_id,
+              bus.route_transitions.from_index_a_id		     as rindex_finish_a,
+              bus.route_transitions.to_index_b_id 			 as rindex_start_b,
+              droutes_zero.rindex       					 as rindex_finish_b,
+              droutes_zero.walk_distance                     as walk_distance,
+              droutes_zero.walk_time                         as walk_time,
+              bus.route_transitions.transition_distance      as trans_distance,
+              bus.route_transitions.transition_time          as trans_time,
+			  bus.routes.cost * temp_use_routes.discount      as droute_cost_a,
+			  droutes_zero.droute_cost * bus.route_transitions.transition_discount as droute_cost_b,
+              3                                              as level,		
+              time_droutes1.freq/2.0 					     as wait_time_a,
+              time_droutes2.freq/2.0 						 as wait_time_b,
+              bus.droute_move_time(droute_b_id,bus.route_transitions.to_index_b_id, droutes_zero.rindex) as move_time_b
+      from droutes_zero
+		join bus.route_transitions  on  droutes_zero.level = 4 and
+		                                bus.route_transitions.droute_b_id = droutes_zero.droute_id and 
+		                                bus.route_transitions.to_index_b_id <= droutes_zero.rindex
+		join bus.direct_routes      on direct_routes.id = bus.route_transitions.droute_a_id
+		join bus.routes             on routes.id = direct_routes.route_id 
+		join temp_use_routes        on temp_use_routes.id = routes.route_type_id 
+		join bus.view_time_droutes  as time_droutes1   on time_droutes1.droute_id =  bus.route_transitions.droute_a_id 
+		join bus.view_time_droutes  as time_droutes2   on time_droutes2.droute_id =  bus.route_transitions.droute_b_id 
+	) as t1
+  );
+
+ -- Найдем маршруты с 2 пересадками
+  for m_rec in  select * from 
+				(select * ,min(table_weight_paths.weight) OVER (PARTITION BY droute_a_id,droute_b_id,droute_c_id) as weight_min from 
+					(select *,
+							table_paths.w + bus._path_weight(table_paths.move_time_b,
+											 0.0,m_alg_strategy) as weight
+					 from ( select  t1.droute_a_id              as  droute_a_id,
+									t1.droute_b_id 			    as	droute_b_id,
+									t2.droute_b_id 			    as	droute_c_id,
+									t1.rindex_start_a 		    as	rindex_start_a,
+									t1.rindex_finish_a	        as	rindex_finish_a,
+									t1.rindex_start_b	        as	rindex_start_b,
+									t2.rindex_finish_a          as  rindex_finish_b,
+									t2.rindex_start_b	        as	rindex_start_c,
+									t2.rindex_finish_b          as  rindex_finish_c,
+									t1.walk_distance 			as distance_a,
+									t1.walk_time 				as walk_time_a,
+									t1.trans_distance           as trans_distance_a,
+									t1.trans_time               as trans_time_a,
+									t2.trans_distance           as trans_distance_b,
+									t2.trans_time               as trans_time_b,
+									t2.walk_distance 			as distance_b,
+									t2.walk_time 				as walk_time_b,
+									t1.droute_cost_a            as cost_a,
+									t1.droute_cost_b            as cost_b,
+									t2.droute_cost_b            as cost_c,
+	                                bus.droute_move_time(t1.droute_b_id,t1.rindex_start_b,
+	                                                    t2.rindex_finish_a)  as move_time_b,
+	                                t1.weight + t2.weight       as w
+							from droutes_one  as t1
+							join droutes_one as t2  on t1.level = 2 and t2.level = 3 and t1.droute_b_id =  t2.droute_a_id and
+                                          t1.rindex_start_b < t2.rindex_finish_a 
+                            limit 250
+                   	) as table_paths
+					) as table_weight_paths
+				) as table_result
+				where weight = weight_min
+				order by weight limit 25
+  loop
+	   
+	   m_wait_time_a := bus.droute_wait_time(m_rec.droute_a_id,m_day_id,m_time_start + m_rec.walk_time_a);
+	   continue when m_wait_time_a is null;
+	   m_move_time_a := bus.droute_move_time(m_rec.droute_a_id,m_rec.rindex_start_a,m_rec.rindex_finish_a);
+       m_wait_time_b := bus.droute_wait_time(m_rec.droute_a_id,m_day_id,m_time_start + m_rec.walk_time_a + m_wait_time_a +
+                                             m_move_time_a + m_rec.trans_time_a);
+	   continue when m_wait_time_b is null;
+	   m_wait_time_c := bus.droute_wait_time(m_rec.droute_a_id,m_day_id,m_time_start + m_rec.walk_time_a + m_wait_time_a + 
+                                             m_move_time_a + m_rec.trans_time_a + m_wait_time_b + m_rec.move_time_b + m_rec.trans_time_b);
+	   continue when m_wait_time_c is null;
+	   m_move_time_c := bus.droute_move_time(m_rec.droute_c_id,m_rec.rindex_start_c,m_rec.rindex_finish_c);
+	   
+	   -- Добавим пешеходный путь к первому паршруту
+	   insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 1, m_rec.walk_time_a, m_rec.distance_a,
+				       bus._path_weight(m_rec.walk_time_a,0.0,m_alg_strategy));
+       
+       -- Добавим передвижение на 1-м маршруте
+       insert into paths(path_id,ind,droute_id,index_start,index_finish,move_time,wait_time,cost,distance,weight)
+				values(m_path_id, 
+						2, 
+						m_rec.droute_a_id,
+						m_rec.rindex_start_a,
+						m_rec.rindex_finish_a,
+						m_move_time_a,
+						m_wait_time_a,
+						m_rec.cost_a,
+						bus.droute_distance(m_rec.droute_a_id,m_rec.rindex_start_a,m_rec.rindex_finish_a),
+						bus._path_weight(m_move_time_a + m_wait_time_a,m_rec.cost_a,m_alg_strategy));
+        -- Добавим ппереход с 1-го на 2-й маршрут
+       insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 3, m_rec.trans_time_a, m_rec.trans_distance_a,
+				       bus._path_weight(m_rec.trans_time_a,0.0,m_alg_strategy));
+	   
+	   -- Добавим передвижение на 2-м маршруте
+	   insert into paths(path_id,ind,droute_id,index_start,index_finish,move_time,wait_time,cost,distance,weight)
+				values(m_path_id, 
+						4, 
+						m_rec.droute_b_id,
+						m_rec.rindex_start_b,
+						m_rec.rindex_finish_b,
+						m_rec.move_time_b,
+						m_wait_time_b,
+						m_rec.cost_b,
+						bus.droute_distance(m_rec.droute_b_id,m_rec.rindex_start_b,m_rec.rindex_finish_b),
+						bus._path_weight(m_rec.move_time_b + m_wait_time_b,m_rec.cost_b,m_alg_strategy));
+						
+        -- Добавим ппереход с 2-го на 3-й маршрут
+       insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 5, m_rec.trans_time_b, m_rec.trans_distance_b,
+				bus._path_weight(m_rec.trans_time_b,0.0,m_alg_strategy));
+			
+	   -- Добавим передвижение на 3-м маршруте
+	   insert into paths(path_id,ind,droute_id,index_start,index_finish,move_time,wait_time,cost,distance,weight)
+				values(m_path_id, 
+						6, 
+						m_rec.droute_c_id,
+						m_rec.rindex_start_c,
+						m_rec.rindex_finish_c,
+						m_move_time_c,
+						m_wait_time_c,
+						m_rec.cost_c,
+						bus.droute_distance(m_rec.droute_c_id,m_rec.rindex_start_c,m_rec.rindex_finish_c),
+						bus._path_weight(m_move_time_c + m_wait_time_c, m_rec.cost_c, m_alg_strategy));
+																
+		-- Добавим пешеходный путь к точке назначения B														
+	   insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 7, m_rec.walk_time_b, m_rec.distance_b,
+				       bus._path_weight(m_rec.walk_time_b,0.0,m_alg_strategy));
+       m_path_id := m_path_id + 1;
+         
+        --raise notice '%', m_rec;
+  end loop; 	 
+ 
+ 
+  -- Найдем маршруты с 3 пересадками
+  for m_rec in  select * from 
+				(select * ,min(table_weight_paths.weight) OVER (PARTITION BY droute_a_id,droute_b_id,droute_c_id,droute_d_id) as weight_min from 
+					(select *,
+							table_paths.w + bus._path_weight(move_time_b + trans_time_c + move_time_c + wait_time_c,
+											 cost_c,m_alg_strategy) as weight
+					 from ( select  t1.droute_a_id             				    as  droute_a_id,
+									t1.droute_b_id 			    			    as	droute_b_id,
+									t2.droute_a_id 			    				as	droute_c_id,
+									t2.droute_b_id 			    				as	droute_d_id,
+									
+									t1.rindex_start_a 		    				as	rindex_start_a,
+									t1.rindex_finish_a	        				as	rindex_finish_a,
+									t1.rindex_start_b	        				as	rindex_start_b,
+									route_transitions.from_index_a_id           as  rindex_finish_b,
+									route_transitions.to_index_b_id  	        as	rindex_start_c,
+									t2.rindex_finish_a                          as  rindex_finish_c,
+									t2.rindex_start_b      	                    as	rindex_start_d,
+									t2.rindex_finish_b                          as  rindex_finish_d,
+									
+									t1.walk_distance 						    as distance_a,
+									t1.walk_time 								as walk_time_a,
+									t2.walk_distance 							as distance_b,
+									t2.walk_time 								as walk_time_b,
+									
+									t1.trans_distance           				as trans_distance_a,
+									t1.trans_time               				as trans_time_a,
+									route_transitions.transition_distance       as trans_distance_b,
+									route_transitions.transition_time           as trans_time_b,
+									t2.trans_distance           				as trans_distance_c,
+									t2.trans_time              				    as trans_time_c,
+
+									t1.droute_cost_a            				as cost_a,
+									t1.droute_cost_b            				as cost_b,
+									t2.droute_cost_a * 
+									transition_discount         				as cost_c,
+									t2.droute_cost_b            				as cost_d,
+									bus.droute_move_time(t1.droute_b_id,t1.rindex_start_b,
+	                                                     route_transitions.from_index_a_id) 			   as move_time_b,
+									bus.droute_move_time(t2.droute_a_id, route_transitions.to_index_b_id,
+	                                                    t2.rindex_finish_a)  							   as move_time_c,
+	                                t2.wait_time_a                                                         as wait_time_c,
+	                                t1.weight + t2.weight       										   as w
+							from droutes_one  as t1
+							join bus.route_transitions on t1.level = 2 and route_transitions.droute_a_id = t1.droute_b_id and
+							                              route_transitions.from_index_a_id > t1.rindex_start_b
+							join droutes_one  as t2    on t2.level = 3 and route_transitions.droute_b_id = t2.droute_a_id and
+														  route_transitions.to_index_b_id < t2.rindex_finish_a
+                            limit 500
+                   	) as table_paths
+					) as table_weight_paths
+				) as table_result
+				where weight <= weight_min + 0.000000004
+				order by weight limit 25
+  loop
+	   m_move_time := m_time_start + m_rec.walk_time_a;
+	   m_wait_time_a := bus.droute_wait_time(m_rec.droute_a_id,m_day_id,m_move_time);
+	   continue when m_wait_time_a is null;
+	   
+	   m_move_time_a := bus.droute_move_time(m_rec.droute_a_id,m_rec.rindex_start_a,m_rec.rindex_finish_a);
+       m_move_time   := m_move_time + m_wait_time_a +   m_move_time_a + m_rec.trans_time_a;
+	   m_wait_time_b := bus.droute_wait_time(m_rec.droute_b_id,m_day_id,m_move_time);
+	   continue when m_wait_time_b is null;
+	   
+	   m_move_time   := m_move_time + m_wait_time_b + m_rec.move_time_b + m_rec.trans_time_b;
+	   m_wait_time_c := bus.droute_wait_time(m_rec.droute_c_id,m_day_id,m_move_time);
+	   continue when m_wait_time_c is null;
+
+	   m_move_time   := m_move_time + m_wait_time_c + m_rec.move_time_c + m_rec.trans_time_c;
+	   m_wait_time_d := bus.droute_wait_time(m_rec.droute_d_id,m_day_id,m_move_time);
+	   continue when m_wait_time_c is null;
+	   
+	   m_move_time_d := bus.droute_move_time(m_rec.droute_d_id,m_rec.rindex_start_d,m_rec.rindex_finish_d);
+	   
+	   -- Добавим пешеходный путь к первому паршруту
+	   insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 1, m_rec.walk_time_a, m_rec.distance_a,
+				        bus._path_weight(m_rec.walk_time_a,0.0,m_alg_strategy));
+       
+       -- Добавим передвижение на 1-м маршруте
+       insert into paths(path_id,ind,droute_id,index_start,index_finish,move_time,wait_time,cost,distance,weight)
+				values(m_path_id, 
+						2, 
+						m_rec.droute_a_id,
+						m_rec.rindex_start_a,
+						m_rec.rindex_finish_a,
+						m_move_time_a,
+						m_wait_time_a,
+						m_rec.cost_a,
+						bus.droute_distance(m_rec.droute_a_id,m_rec.rindex_start_a,m_rec.rindex_finish_a),
+						bus._path_weight(m_move_time_a+m_wait_time_a,m_rec.cost_a,m_alg_strategy));
+        -- Добавим ппереход с 1-го на 2-й маршрут
+       insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 3, m_rec.trans_time_a, m_rec.trans_distance_a,0);
+	   
+	   -- Добавим передвижение на 2-м маршруте
+	   insert into paths(path_id,ind,droute_id,index_start,index_finish,move_time,wait_time,cost,distance,weight)
+				values(m_path_id, 
+						4, 
+						m_rec.droute_b_id,
+						m_rec.rindex_start_b,
+						m_rec.rindex_finish_b,
+						m_rec.move_time_b,
+						m_wait_time_b,
+						m_rec.cost_b,
+						bus.droute_distance(m_rec.droute_b_id,m_rec.rindex_start_b,m_rec.rindex_finish_b),
+						bus._path_weight(m_rec.move_time_b + m_wait_time_b,m_rec.cost_b,m_alg_strategy));
+						
+        -- Добавим переход с 2-го на 3-й маршрут
+       insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 5, m_rec.trans_time_b, m_rec.trans_distance_b,
+					   bus._path_weight(m_rec.trans_time_b,0.0,m_alg_strategy));
+			
+	   -- Добавим передвижение на 3-м маршруте
+	   insert into paths(path_id,ind,droute_id,index_start,index_finish,move_time,wait_time,cost,distance,weight)
+				values(m_path_id, 
+						6, 
+						m_rec.droute_c_id,
+						m_rec.rindex_start_c,
+						m_rec.rindex_finish_c,
+						m_rec.move_time_c,
+						m_wait_time_c,
+						m_rec.cost_c,
+						bus.droute_distance(m_rec.droute_c_id,m_rec.rindex_start_c,m_rec.rindex_finish_c),
+						bus._path_weight(m_rec.move_time_c + m_wait_time_c,m_rec.cost_c,m_alg_strategy));
+
+        -- Добавим переход с 3-го на 4-й маршрут
+       insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 7, m_rec.trans_time_c, m_rec.trans_distance_c,
+				       bus._path_weight(m_rec.trans_time_c,0.0,m_alg_strategy));
+			
+	   -- Добавим передвижение на 4-м маршруте
+	   insert into paths(path_id,ind,droute_id,index_start,index_finish,move_time,wait_time,cost,distance,weight)
+				values(m_path_id, 
+						8, 
+						m_rec.droute_d_id,
+						m_rec.rindex_start_d,
+						m_rec.rindex_finish_d,
+						m_move_time_d,
+						m_wait_time_d,
+						m_rec.cost_d,
+						bus.droute_distance(m_rec.droute_c_id,m_rec.rindex_start_c,m_rec.rindex_finish_c),
+						bus._path_weight(m_move_time_d + m_wait_time_d,m_rec.cost_d,m_alg_strategy));
+																						
+		-- Добавим пешеходный путь к точке назначения B														
+	   insert into paths(path_id,ind,move_time,distance,weight)
+				values(m_path_id, 9, m_rec.walk_time_b, m_rec.distance_b,
+				       bus._path_weight(m_rec.walk_time_b,0.0,m_alg_strategy));
+      
+       m_path_id := m_path_id + 1;
+         
+      --  raise notice '%', m_rec;
+  end loop; 	
+   
+  -- Выведем рузультат
+/* 	    path_id         integer,
+	    ind             integer,
+	    droute_id       bigint,
+	    index_start     integer,
+	    index_finish    integer,
+	    move_time       interval,
+	    wait_time       interval,
+	    cost            double precision,
+	    distance        double precision,
+	    weight     double precision*/
+  --return;
+  
+  FOR m_path_elem IN 
+        SELECT 
+		paths.path_id  			        as path_id,
+		paths.ind   			        as index,
+		bus.direct_routes.id 		    as direct_route_id,
+		bus.routes.route_type_id 	    as route_type,  
+		bus.route_full_name(bus.routes.number, route_names.value)  as route_name,
+		paths.index_start            		as relation_index_a,
+		paths.index_finish					as relation_index_b,
+		sta_names.value             		as station_name_a,
+		stb_names.value             		as station_name_b,
+		paths.move_time                 	as move_time,
+		paths.wait_time                 	as wait_time,
+		paths.cost                      	as cost,
+		paths.distance                  	as distance
+        FROM  paths
+        LEFT JOIN bus.direct_routes                    	     ON bus.direct_routes.id = paths.droute_id
+	    LEFT JOIN bus.routes                                 ON bus.routes.id = bus.direct_routes.route_id
+        LEFT JOIN bus.string_values as route_names           ON route_names.key_id = bus.routes.name_key  
+        LEFT JOIN bus.route_relations as rel_a               ON rel_a.direct_route_id = bus.direct_routes.id and 
+                                                                rel_a.position_index = paths.index_start
+        LEFT JOIN bus.stations        as sta                 ON sta.id = rel_a.station_b_id
+        LEFT JOIN bus.string_values   as sta_names	         ON sta_names.key_id = sta.name_key   
+        
+        LEFT JOIN bus.route_relations as rel_b               ON rel_b.direct_route_id = bus.direct_routes.id and 
+                                                                rel_b.position_index = paths.index_finish
+        LEFT JOIN bus.stations        as stb                 ON stb.id = rel_b.station_b_id
+        LEFT JOIN bus.string_values as stb_names	         ON stb_names.key_id = stb.name_key  
+                             
+        WHERE (route_names.lang_id = _lang_id or route_names.lang_id IS NULL) AND
+              (sta_names.lang_id = _lang_id or sta_names.lang_id IS NULL) AND
+              (stb_names.lang_id = _lang_id or stb_names.lang_id IS NULL)
+  LOOP
+         RETURN NEXT m_path_elem;
+   END LOOP; 
+   
+ 
+  raise notice 'Time: %', clock_timestamp() - m_fix_time;
+  return;
+
+  
+--================================================================================================================= 
+ -- Зададим id начальной и конечной дуги
+ _start_id  := -10;
+ _finish_id := -11;
+  
+ 
+ CREATE TEMPORARY  TABLE temp_nearest_relations  ON COMMIT DROP AS
+    (SELECT   -row_number() over (ORDER BY (select 0))-1 		      			   as id,
+              _start_id           												   as node_a_id,
+              bus._graph_nodes.id  												   as node_b_id,
+              bus.route_type_enum('c_route_transition')                            as relation_type,
+              bus.get_walking_move_time(stations.distance)                         as move_time,
+              interval '00:00:00'	                    						   as wait_time,
+			  0                                                                    as cost_money,
+			  bus.interval_to_double(bus.get_walking_move_time(stations.distance)) as cost_time,
+			  stations.distance                                                    as distance
+		FROM bus.find_nearest_stations(_p1, _city_id, _max_distance) as stations
+        join bus._graph_nodes    ON bus._graph_nodes.station_id = stations.id and bus._graph_nodes.route_relation_id is null
+     ); 
+     
+  -- Найдем ближайшие дуги до конечной точки назначения и сохраним их в таблицу nearest_relations
+  SELECT min(id) INTO i FROM temp_nearest_relations;  
+  
+  INSERT INTO temp_nearest_relations(id,node_a_id,node_b_id,relation_type,move_time,
+                                wait_time,cost_money,cost_time,distance)
+    (SELECT   -row_number() over (ORDER BY (select 0)) + i		      			   as id,
+              bus._graph_nodes.id  												   as node_a_id,
+              _finish_id           												   as node_b_id,
+              bus.route_type_enum('c_route_transition')                            as relation_type,
+              bus.get_walking_move_time(stations.distance)                         as move_time,
+              interval '00:00:00'	                    						   as wait_time,
+			  0                                                                    as cost_money,
+			  bus.interval_to_double(bus.get_walking_move_time(stations.distance)) as cost_time,
+			  stations.distance                                                    as distance
+		FROM bus.find_nearest_stations(_p2, _city_id, _max_distance) as stations
+        join bus._graph_nodes    ON bus._graph_nodes.station_id = stations.id and bus._graph_nodes.route_relation_id is null
+     );
+  
+  -- Составим query графа
+  IF _alg_strategy = bus.alg_strategy('c_time') THEN
+  	query := '(SELECT bus._graph_relations.id             as id,'     ||
+  	         '        node_a_id::integer                           as source,' ||
+  	         '        node_b_id::integer                           as target,' || 
+  	         '        cost_time                           as cost, '   ||
+  	         '        false                               as is_transition, '   ||
+  	         '        bus._graph_relations.route_id       as route_id '   ||
+  	         ' FROM bus._graph_relations '                       ||
+  	         ' JOIN temp_use_routes ON temp_use_routes.id = bus._graph_relations.relation_type' ||
+  	         '  where city_id = ' ||  _city_id                      ||
+  	         ')UNION ALL'                                        ||
+  	         '(SELECT temp_nearest_relations.id           as id,'     ||
+  	         '        node_a_id::integer                           as source,' ||
+  	         '        node_b_id::integer                           as target,' || 
+  	         '        cost_time                           as cost, '   ||
+  	         '        false                               as is_transition, '   ||
+  	         '        0                               as route_id '   ||
+  	         ' FROM temp_nearest_relations '                          ||
+  	         ' JOIN temp_use_routes ON temp_use_routes.id = temp_nearest_relations.relation_type' ||
+  	         ')';
+  	ELSEIF _alg_strategy = bus.alg_strategy('c_cost') THEN
+  ELSE
+   END IF;	
+   i:=1;
+   
+ /*  FOR _r IN EXECUTE ('select * from ( '|| query || ' ) as tt1') 
+   LOOP
+     RAISE  NOTICE 'output data: %',_r; 
+     i := i + 1;
+   END LOOP;*/
+  
+  -- Создадим временную таблицу paths, в которую сохраним найденные пути
+  CREATE TEMPORARY TABLE temp_paths
+  (
+     path_id     integer, -- id пути
+     index       integer, -- индекс дуги
+     node_id     integer, -- id дуги из таблицы bus.route_relations
+     relation_id bigint   -- id дуги из таблицы bus._graph_relations
+  )ON COMMIT DROP;
+  
+ /* RAISE NOTICE 'paths:';
+  FOR _r IN select *
+		   from bus.lib_shortest_paths(query,_start_id,_finish_id,true,false) as t1
+  LOOP
+    RAISE NOTICE '%',_r;
+  END LOOP;
+  RAISE NOTICE 'paths end.';*/
+  -- Найдем кратчайший путь
+  BEGIN
+     INSERT INTO temp_paths(path_id,index,node_id,relation_id)
+		   select t1.path_id                                 as path_id,
+                  row_number() over (ORDER BY (select 0))    as index,
+		          t1.vertex_id                               as node_id,
+		          t1.edge_id                                 as relation_id
+		   from bus.lib_shortest_paths(query,_start_id,_finish_id,true,false) as t1;
+  --EXCEPTION  WHEN OTHERS THEN 
+      RAISE  NOTICE 'count(i222): %',i; 
+  END;
+ 
+   -- Создадим временную таблицу paths, в которую сохраним найденные пути
+  CREATE TEMPORARY TABLE tmp_results
+  (
+	path_id                integer,
+	index                  integer,
+    direct_route_id        bigint,
+    relation_index         integer,
+    route_id               integer,
+    station_id             integer,
+    move_time              interval,
+    distance               double precision
+  )ON COMMIT DROP;
+  
+  INSERT INTO tmp_results(path_id,index,direct_route_id,relation_index,route_id,station_id,move_time,distance)
+  select  
+       t1.path_id,
+       t1.index,
+       t1.direct_route_id,
+       t1.relation_index,
+       t1.route_id as route_id,
+       t1.station_id as station_id,
+       t1.ev_time + ( t1.last_index - t1.first_index)*bus._STATION_TIME_PAUSE() as move_time,
+       t1.distance
+from(
+select temp_paths.path_id as path_id,
+       temp_paths.index   as index, 
+       bus.route_relations.station_b_id      as station_id,
+       bus.route_relations.position_index  as relation_index,
+       bus.route_relations.direct_route_id as direct_route_id,
+       bus.direct_routes.route_id as route_id,
+       sum(bus.route_relations.distance)       OVER (PARTITION BY temp_paths.path_id,bus.route_relations.direct_route_id)as distance,
+       sum(bus.route_relations.ev_time)        OVER (PARTITION BY temp_paths.path_id,bus.route_relations.direct_route_id)as ev_time,
+       min(bus.route_relations.position_index) OVER (PARTITION BY temp_paths.path_id,bus.route_relations.direct_route_id) as first_index,
+       max(bus.route_relations.position_index) OVER (PARTITION BY temp_paths.path_id,bus.route_relations.direct_route_id) as last_index
+       from temp_paths
+         join bus._graph_nodes on bus._graph_nodes.id =  temp_paths.node_id
+         join bus.route_relations on bus.route_relations.id = bus._graph_nodes.route_relation_id
+         join bus.direct_routes on bus.direct_routes.id = bus.route_relations.direct_route_id
+ ) as t1
+ where (t1.relation_index = t1.first_index or t1.relation_index = t1.last_index ) ;
+  
+  
+  INSERT INTO tmp_results(path_id,index,move_time,distance)
+  select  
+       path_id,
+       index,
+       graph_relations.move_time,
+       graph_relations.distance
+from temp_paths
+
+         join ((SELECT id,relation_type,move_time,distance FROM bus._graph_relations) 
+	           UNION ALL 
+	           (SELECT id,relation_type,move_time,distance FROM temp_nearest_relations)
+	          ) as graph_relations 
+	      on graph_relations.id =  temp_paths.relation_id 
+   where graph_relations.relation_type = 'c_route_transition';
+ 
+ -- Возвратим таблицу way_elem 
+   FOR _way_elem IN 
+        SELECT 
+		tmp_results.path_id  			        as path_id,
+		tmp_results.index 			        as index,
+		tmp_results.direct_route_id		    as direct_route_id,
+		bus.routes.route_type_id 	    as route_type,  
+		tmp_results.relation_index            as relation_index,
+		bus.route_full_name(bus.routes.number,route_names.value) as route_name,
+		station_names.value              as station_name, 
+		tmp_results.move_time                  as move_time,
+		time_table.freq                  as wait_time,
+		bus.routes.cost                       as cost,
+		tmp_results.distance                   as distance
+        FROM tmp_results
+	    LEFT JOIN bus.routes                                 ON bus.routes.id = tmp_results.route_id
+        LEFT JOIN bus.string_values as route_names           ON route_names.key_id = bus.routes.name_key  
+        LEFT JOIN bus.stations                               ON bus.stations.id = tmp_results.station_id
+        LEFT JOIN bus.string_values as station_names	     ON station_names.key_id = bus.stations.name_key  
+          LEFT JOIN (select route_id,avg(freq) as freq from bus.time_routes group by route_id) as time_table 
+                             ON  time_table.route_id = bus.routes.id
+        WHERE (route_names.lang_id = _lang_id or route_names.lang_id IS NULL) AND
+              (station_names.lang_id = _lang_id or station_names.lang_id IS NULL)
+  LOOP
+    -- _way_elem.wait_time = interval '00:00:00';
+         RETURN NEXT _way_elem;
+  END LOOP; 
+    
+   
+  return;   
+ -- Сохраним в _paths только нужную  инфу о маршрутах
+ _prev_filter_path := null;
+ FOR _curr_filter_path IN 
+        SELECT 
+		temp_paths.path_id                                    as path_id,
+		temp_paths.graph_id									  as graph_id,
+		temp_paths.index                                      as index,
+		temp_paths.relation_id                                as relation_id,
+		bus.route_relations.direct_route_id                   as direct_route_id,
+		bus.route_relations.position_index                    as relation_index,
+		bus.route_relations.station_b_id                      as station_id,
+		graph_relations.relation_b_type                       as route_type,
+		graph_relations.move_time                             as move_time,
+		(graph_relations.cost_money*temp_use_routes.discount) as cost,
+		graph_relations.distance                              as distance,
+		graph_relations.is_transition                         as is_transition
+		
+	    FROM temp_paths 
+        LEFT JOIN bus.route_relations                  	     ON bus.route_relations.id = temp_paths.relation_id
+	    LEFT JOIN ( (SELECT id,relation_b_type,move_time,cost_money,distance,is_transition FROM bus._graph_relations) 
+	                 UNION ALL 
+	                (SELECT id,relation_b_type,move_time,cost_money,distance,is_transition FROM temp_nearest_relations)) as graph_relations 
+	         ON graph_relations.id = temp_paths.graph_id
+	    LEFT JOIN temp_use_routes                                 ON temp_use_routes.id = graph_relations.relation_b_type 
+	ORDER BY temp_paths.path_id,temp_paths.index
+  LOOP
+     -- Если текущий путь не меняется, 
+     IF _curr_filter_path.relation_id = _start_id THEN
+			
+     ELSEIF _curr_filter_path.relation_id = _finish_id THEN
+			--RAISE  NOTICE 'finish path: %',_curr_filter_path; 
+ 			 _temp_filter_path:= null;
+             _temp_filter_path.distance   := _prev_filter_path.distance;
+             _temp_filter_path.move_time  := _prev_filter_path.move_time;
+			 _temp_filter_path.route_type :=  bus.route_type_enum('c_route_station_output');
+			 _temp_filter_path.index      := 10000;
+			 _temp_filter_path.path_id    := _prev_filter_path.path_id;
+			 _paths:= array_append(_paths,_temp_filter_path);
+
+     ELSEIF _curr_filter_path.direct_route_id <> _prev_filter_path.direct_route_id OR
+            _prev_filter_path.direct_route_id IS NULL THEN 
+			-- RAISE  NOTICE 'path: %',_curr_filter_path; 
+			
+			-- Добавим данные о начале  текущего маршрута
+			_temp_filter_path           := _curr_filter_path;
+			_temp_filter_path.move_time := _prev_filter_path.move_time;
+			_temp_filter_path.cost      := _prev_filter_path.cost;
+			_temp_filter_path.distance  := _prev_filter_path.distance;
+			_paths:= array_append(_paths,_temp_filter_path);
+             -- Обнулим накапливающие переменные времени передвижения и длины текущего маршрута
+			_move_time := _curr_filter_path.move_time;
+			_distance  := _curr_filter_path.distance;
+     ELSEIF _curr_filter_path.graph_id <= 0 OR 
+            _curr_filter_path.is_transition = true THEN
+            --RAISE  NOTICE 'path: %',_curr_filter_path; 
+            -- Добавим данные о конце  текущего маршрута
+			_temp_filter_path           := _curr_filter_path;
+            _temp_filter_path.move_time := _move_time;
+            _temp_filter_path.cost      := null;
+            _temp_filter_path.distance  := _distance;
+            _paths :=  array_append(_paths,_temp_filter_path);
+	 ELSE
+			--RAISE  NOTICE 'path: %',_curr_filter_path; 
+			_move_time := _move_time + _curr_filter_path.move_time;
+			_distance  := _distance + _curr_filter_path.distance;
+     
+     END IF;
+     _prev_filter_path := _curr_filter_path;
+    -- RAISE  NOTICE 'path: %',_curr_filter_path; 
+   END LOOP;
+  
+ -- return data
+ FOR _way_elem IN 
+        SELECT 
+		paths.path_id  			        as path_id,
+		paths.index 			        as index,
+		bus.direct_routes.id 		    as direct_route_id,
+		bus.routes.route_type_id 	    as route_type,  
+		paths.relation_index            as relation_index,
+		text(bus.routes.number) || bus.get_string_without_null(route_names.value)     as route_name,
+		station_names.value              as station_name, 
+		paths.move_time                  as move_time,
+		time_table.freq                  as wait_time,
+		paths.cost                       as cost,
+		paths.distance                   as distance
+        FROM unnest(_paths) as paths
+        LEFT JOIN bus.direct_routes                    	     ON bus.direct_routes.id = paths.direct_route_id
+	    LEFT JOIN bus.routes                                 ON bus.routes.id = bus.direct_routes.route_id
+        LEFT JOIN bus.string_values as route_names           ON route_names.key_id = bus.routes.name_key  
+        LEFT JOIN bus.stations                               ON bus.stations.id = paths.station_id
+        LEFT JOIN bus.string_values as station_names	     ON station_names.key_id = bus.stations.name_key  
+          LEFT JOIN (select route_id,avg(freq) as freq from bus.time_routes group by route_id) as time_table 
+                             ON  time_table.route_id = bus.routes.id
+                             
+        WHERE (route_names.lang_id = _lang_id or route_names.lang_id IS NULL) AND
+              (station_names.lang_id = _lang_id or station_names.lang_id IS NULL)
+  LOOP
+         RETURN NEXT _way_elem;
+   END LOOP; 
+
+END;
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;		
+
+--==========================================================================================================================  
+/*
+*/
+CREATE OR REPLACE FUNCTION bus.update_route_transitons( droute_id  bigint)
+RETURNS void AS
+$BODY$
+DECLARE
+ _city_id bigint;
+ transition bus.route_transition;
+ flag bool;
+ _id bigint;
+ ind integer;
+BEGIN
+  -- Удалим все переходы с/на текущий маршрут
+  delete from bus.route_transitions where (droute_a_id = droute_id or droute_b_id = droute_id) and set_manual = false;
+  
+  -- Узнаем город для текущего маршрута
+   select bus.routes.city_id into _city_id from bus.direct_routes 
+         join bus.routes on bus.routes.id = bus.direct_routes.route_id
+         where bus.direct_routes.id = droute_id limit 1;
+   
+  -- Найдем переходы м/у маршрутами
+   for _id in select bus.direct_routes.id from bus.direct_routes 
+       join bus.routes on bus.routes.id = bus.direct_routes.route_id
+       where city_id = _city_id 
+   loop
+     	flag := false;
+     	ind := 0;
+		loop
+		    transition := bus.find_route_transiton(droute_id,_id,ind);
+		    if transition is null then
+				exit;
+			end if;
+			insert into bus.route_transitions 
+				(droute_a_id,
+				 droute_b_id,
+				 from_index_a_id,
+				 to_index_b_id,
+				 transition_distance,
+				 transition_time,
+				 transition_discount,
+				 set_manual
+				) 
+			values (
+				 droute_id,
+				 _id,
+				 transition.index_a,
+				 transition.index_b,
+				 transition.distance,
+				 bus.get_walking_move_time(transition.distance),
+				 1.0,
+				 false
+			);
+			ind := transition.index_a + 1;
+			-- raise notice 'droute_a : %, droute_b: %, transition: %',droute_id,_id, transition;
+     	end loop;
+   end loop;
+   
+   
+END;
+$BODY$
+LANGUAGE plpgsql VOLATILE;
+
+--==========================================================================================================================  
+CREATE OR REPLACE FUNCTION bus._is_has_transition(_curr_relation_a_id integer, 
+						 _curr_relation_b_id integer,
+						 _max_distance double precision
+						 )
+RETURNS bool AS
+$BODY$
+DECLARE
+  _curr_relation_a    bus.route_relations%ROWTYPE;
+  curr_relation_b_sta bigint;
+  curr_relation_b_stb bigint;
+  
+  next_relation_a_stb bigint;
+BEGIN
+ --  RETURN 1;
+    SELECT id,direct_route_id,station_a_id,station_b_id,position_index INTO _curr_relation_a FROM bus.route_relations WHERE id = _curr_relation_a_id LIMIT 1;
+  IF NOT FOUND THEN
+	RAISE EXCEPTION 'function bus.get_next_relation(): Cannot find relation';
+  END IF;
+    SELECT station_a_id,station_b_id INTO curr_relation_b_sta,curr_relation_b_stb FROM bus.route_relations WHERE id = _curr_relation_b_id LIMIT 1;
+  IF NOT FOUND THEN
+	RAISE EXCEPTION 'function bus.get_next_relation(): Cannot find relation';
+  END IF;
+  
+  
+  IF  bus.is_nearest_stations(_curr_relation_a.station_a_id,curr_relation_b_stb, _max_distance)  THEN
+    return false;
+  END IF;
+ 
+   SELECT station_b_id INTO next_relation_a_stb FROM bus.route_relations WHERE direct_route_id = _curr_relation_a.direct_route_id AND 
+                                                                               position_index = _curr_relation_a.position_index LIMIT 1;
+   IF NOT FOUND THEN
+	return true;
+  END IF;
+   
+ --_next_relation_a := bus._get_next_relation(_curr_relation_a.direct_route_id,_curr_relation_a.position_index);
+  IF next_relation_a_stb IS NOT NULL AND next_relation_a_stb = curr_relation_b_stb THEN
+	return false;
+  END IF;
+  
+  return true;
+END;
+$BODY$
+LANGUAGE plpgsql IMMUTABLE;
+
+--===============================================================================================================/*
+/*  Функция  ищет первый возможый переход с маршрута _from_droute_id на 
+  маршрут _to_droute_id, начиная с дуги первого маршрута, индекс которой равен _start_index.
+  
+  @_from_droute_id Id маршрута, для которого ищем переход на маршрут _to_droute_id
+  @_to_droute_id Id машршрута, на который возможен переход с маршрута _from_droute_id
+  @_start_index Индекс дуги маршута droute1_id, с которой начинаем поиск перехода на droute2_id
+  @return Возвращает первый найденный переход
+*/
+CREATE OR REPLACE FUNCTION bus.find_route_transiton( _from_droute_id  bigint, 
+                                                    _to_droute_id    bigint,
+                                                    _start_index     integer
+                                                    )
+RETURNS bus.route_transition AS
+$BODY$
+DECLARE
+ _r bus.route_transition;
+ r1_id bigint;
+ r2_id bigint;
+ 
+BEGIN
+SELECT bus.direct_routes.route_id INTO r1_id FROM bus.direct_routes where id = _from_droute_id LIMIT 1;
+SELECT bus.direct_routes.route_id INTO r2_id FROM bus.direct_routes where id = _to_droute_id LIMIT 1;
+if r1_id = r2_id then
+    return null;
+end if;  
+-- Найдем дуги(переходы) между пересек. маршрутами
+ FOR _r IN 
+   SELECT  
+           table1.id as route_relation_a_id, 
+           table2.id as route_relation_b_id, 
+           table1.position_index as index_a,
+           table2.position_index as index_b,
+           st_distance(table1.location, table2.location) as distance
+   FROM  
+	(select  bus.route_relations.id as id,
+	         position_index,
+	         location,
+	         station_b_id
+	    from bus.route_relations
+	    join bus.stations ON bus.stations.id = bus.route_relations.station_b_id
+	    where direct_route_id = _from_droute_id and position_index >= _start_index
+	    order by position_index
+        ) as table1
+        ,
+    (select  bus.route_relations.id as id,
+             position_index,
+             location, 
+             station_a_id
+        from bus.route_relations
+	    join bus.stations ON bus.stations.id = bus.route_relations.station_a_id
+        where direct_route_id = _to_droute_id
+	    order by position_index
+        ) as table2
+   WHERE  ST_DWithin(table1.location, table2.location,bus._MAX_TRANSITION_DISTANCE())
+         AND    bus._is_has_transition(table1.id,table2.id, bus._MAX_TRANSITION_DISTANCE()/2.0)
+   LIMIT 1            
+ LOOP
+ END LOOP;
+ return _r;
+END;
+$BODY$
+LANGUAGE plpgsql IMMUTABLE;
 
 --===============================================================================================================
 /* Преобразует interval к double precision
@@ -696,7 +1945,7 @@ $BODY$
 
 --===============================================================================================================
 
-  CREATE OR REPLACE FUNCTION bus.find_shortest_paths(	_city_id  	bigint,
+  CREATE OR REPLACE FUNCTION bus.find_shortest_paths_old(	_city_id  	bigint,
 							_p1 		geography,
 							_p2 		geography,
 							_day_id 	bus.day_enum,
@@ -1145,22 +2394,27 @@ $BODY$
 CREATE OR REPLACE FUNCTION bus.find_nearest_relations(
    _location       geography,           -- местоположение точки назначения
    _city_id        bigint,              -- город
-   max_distance    double precision     -- максимальное расстояние от/до точки назначения
+   max_distance    double precision     -- максимальное расстояние от/до точки назначения,
+    
 )
-RETURNS SETOF bus.nearest_relation AS
+RETURNS TABLE (relation_id bigint, rindex integer, droute_id bigint, distance double precision) AS
 $BODY$
 DECLARE
-  _relation bus.nearest_relation;
 BEGIN
-    FOR _relation IN SELECT 
-                              bus.route_relations.id          as id ,
-                              st_distance(location,_location) as distance
-                     FROM bus.route_relations
-                     JOIN bus.stations           ON bus.stations.id = bus.route_relations.station_B_id  
-                     WHERE city_id = _city_id AND  ST_DWithin(location, _location,max_distance)
-    LOOP
-         RETURN NEXT _relation;
-   END LOOP;
+    return query select tt1.relation_id,tt1.rindex,tt1.droute_id,tt1.distance from 
+                        (select *,min(t1.distance) OVER (PARTITION BY t1.droute_id ORDER BY t1.distance) as min from
+							    (select 
+			                         bus.route_relations.direct_route_id as droute_id,
+                                     bus.route_relations.id::bigint          as relation_id,
+                                     bus.route_relations.position_index::integer as rindex,
+                                     st_distance(location,_location) as distance
+                                 from bus.route_relations
+								 join bus.stations           ON bus.stations.id = bus.route_relations.station_B_id  
+								 where city_id = _city_id AND  ST_DWithin(location, _location,max_distance )
+						        ) as t1 
+                       ) as tt1
+                 where tt1.distance = tt1.min
+                 order by tt1.distance;    
     
 END;
 $BODY$

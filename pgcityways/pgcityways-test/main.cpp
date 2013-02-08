@@ -11,7 +11,7 @@
 #include "GraphTest.cpp"
 #include "PgCityWaysTest.cpp"
 #include "DijkstraPathFinderTest.cpp"
-
+#include "EppsteinPathFinderTest.cpp"
 
 
 int main(int argc, char *argv[])
@@ -25,11 +25,12 @@ int main(int argc, char *argv[])
     PgCityWaysTest pgCityWaysTest;
     DijkstraPathFinderTest dijkstraPathFinderTest;
     YenPathFinderTest yenPathFinderTest;
-
-    QTest::qExec(&graphTest, argc, argv);
+    EppsteinPathFinderTest eppsteinPathFinderTest;
+   /* QTest::qExec(&graphTest, argc, argv);
     QTest::qExec(&dijkstraPathFinderTest, argc, argv);
     QTest::qExec(&pgCityWaysTest, argc, argv);
-    QTest::qExec(&yenPathFinderTest, argc, argv);
+    QTest::qExec(&yenPathFinderTest, argc, argv);*/
+    QTest::qExec(&eppsteinPathFinderTest, argc, argv);
 
 
     return 0;

@@ -30,14 +30,18 @@ INCLUDEPATH += ../pgcityways
 
 
 SOURCES +=  ../pgcityways/bdij/*.cpp \
-    YenPathFinderTest.cpp
+    YenPathFinderTest.cpp \
+    EppsteinPathFinderTest.cpp
+
 SOURCES +=  ../pgcityways/core/*.cpp
 SOURCES +=  ../pgcityways/yen/*.cpp
 SOURCES +=  ../pgcityways/log/*.cpp
+SOURCES +=  ../pgcityways/epps/*.cpp
 
 HEADERS +=  ../pgcityways/bdij/*.h
 HEADERS +=  ../pgcityways/core/*.h
 HEADERS +=  ../pgcityways/yen/*.h
+HEADERS +=  ../pgcityways/epps/*.h
 HEADERS +=  ../pgcityways/log/*.h
 HEADERS +=  ../pgcityways/db/*.h
 ####################################

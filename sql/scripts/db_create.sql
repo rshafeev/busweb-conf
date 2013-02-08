@@ -91,15 +91,18 @@ CREATE TYPE bus.filter_path AS
     distance double precision,
     is_transition  boolean);
 
-CREATE TYPE bus.way_elem AS
+CREATE TYPE bus.path_t AS
 (
    path_id                integer,
    index                  integer,
    direct_route_id        bigint,
    route_type             bus.route_type_enum,
-   relation_index         integer,
    route_name             text,
-   station_name           text,
+   
+   relation_index_a       integer,
+   relation_index_b       integer,
+   station_name_a           text,
+   station_name_b           text,
    move_time              interval,
    wait_time              interval,
    cost                   double precision,
@@ -462,6 +465,7 @@ CREATE TABLE bus.timetable
 
 
 --================ Переходы между маршрутами
+/*
 CREATE TABLE bus.route_transitions
 (
    id  			          bigserial 			 NOT NULL,
@@ -483,7 +487,7 @@ CREATE TABLE bus.route_transitions
       ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
    	
 );
-
+*/
 
 --================ Переходы между станциями
 CREATE TABLE bus.station_transitions
@@ -571,6 +575,30 @@ CREATE TABLE bus._graph_relations
 
 );
 
+--================
+CREATE TABLE bus.route_transitions
+(
+  id			      bigserial 		 NOT NULL,
+  droute_a_id         bigint  			 NOT NULL,
+  droute_b_id         bigint  			 NOT NULL,
+  from_index_a_id     integer 			 NOT NULL,
+  to_index_b_id       integer 			 NOT NULL,
+  transition_distance double precision   NOT NULL,
+  transition_time     interval           NOT NULL,
+  transition_discount real               NOT NULL, -- Скидка на проезд [0..1]
+  set_manual          bool               NOT NULL,
+                   
+  CONSTRAINT _route_transitions_pk PRIMARY KEY (id),
+  
+  CONSTRAINT _route_transitions_droute_a_id_fk FOREIGN KEY (droute_a_id)
+      REFERENCES bus.direct_routes (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+  
+  CONSTRAINT _route_transitions_droute_b_id_fk FOREIGN KEY (droute_b_id)
+      REFERENCES bus.direct_routes (id) MATCH SIMPLE
+      ON UPDATE CASCADE ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+  
+);
 --================
 CREATE TABLE bus.import_objects
 (

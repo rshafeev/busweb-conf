@@ -17,7 +17,8 @@ SOURCES += \
     core/graphdata.cpp \
     log/testlogger.cpp \
     yen/YenPathFinder.cpp \
-    bdij/boostpath.cpp
+    bdij/boostpath.cpp \
+    epps/EppsteinPathFinder.cpp
 
 
 HEADERS += \
@@ -31,7 +32,8 @@ HEADERS += \
     core/graphdata.h \
     log/testlogger.h \
     yen/YenPathFinder.h \
-    bdij/boostpath.h
+    bdij/boostpath.h \
+    epps/EppsteinPathFinder.h
 
 
 #BOOST LIB

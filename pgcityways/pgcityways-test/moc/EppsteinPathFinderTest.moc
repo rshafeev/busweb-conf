@@ -1,14 +1,14 @@
 /****************************************************************************
-** Meta object code from reading C++ file 'YenPathFinderTest.cpp'
+** Meta object code from reading C++ file 'EppsteinPathFinderTest.cpp'
 **
-** Created: Thu Jan 31 20:46:45 2013
+** Created: Thu Jan 31 20:46:44 2013
 **      by: The Qt Meta Object Compiler version 63 (Qt 4.8.2)
 **
 ** WARNING! All changes made in this file will be lost!
 *****************************************************************************/
 
 #if !defined(Q_MOC_OUTPUT_REVISION)
-#error "The header file 'YenPathFinderTest.cpp' doesn't include <QObject>."
+#error "The header file 'EppsteinPathFinderTest.cpp' doesn't include <QObject>."
 #elif Q_MOC_OUTPUT_REVISION != 63
 #error "This file was generated using the moc from 4.8.2. It"
 #error "cannot be used with the include files from this version of Qt."
@@ -16,7 +16,7 @@
 #endif
 
 QT_BEGIN_MOC_NAMESPACE
-static const uint qt_meta_data_YenPathFinderTest[] = {
+static const uint qt_meta_data_EppsteinPathFinderTest[] = {
 
  // content:
        6,       // revision
@@ -30,23 +30,23 @@ static const uint qt_meta_data_YenPathFinderTest[] = {
        0,       // signalCount
 
  // slots: signature, parameters, type, tag, flags
-      19,   18,   18,   18, 0x08,
-      34,   18,   18,   18, 0x08,
-      58,   18,   18,   18, 0x08,
+      24,   23,   23,   23, 0x08,
+      39,   23,   23,   23, 0x08,
+      63,   23,   23,   23, 0x08,
 
        0        // eod
 };
 
-static const char qt_meta_stringdata_YenPathFinderTest[] = {
-    "YenPathFinderTest\0\0initTestCase()\0"
+static const char qt_meta_stringdata_EppsteinPathFinderTest[] = {
+    "EppsteinPathFinderTest\0\0initTestCase()\0"
     "findShortestPathsTest()\0cleanupTestCase()\0"
 };
 
-void YenPathFinderTest::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, void **_a)
+void EppsteinPathFinderTest::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, void **_a)
 {
     if (_c == QMetaObject::InvokeMetaMethod) {
         Q_ASSERT(staticMetaObject.cast(_o));
-        YenPathFinderTest *_t = static_cast<YenPathFinderTest *>(_o);
+        EppsteinPathFinderTest *_t = static_cast<EppsteinPathFinderTest *>(_o);
         switch (_id) {
         case 0: _t->initTestCase(); break;
         case 1: _t->findShortestPathsTest(); break;
@@ -57,33 +57,33 @@ void YenPathFinderTest::qt_static_metacall(QObject *_o, QMetaObject::Call _c, in
     Q_UNUSED(_a);
 }
 
-const QMetaObjectExtraData YenPathFinderTest::staticMetaObjectExtraData = {
+const QMetaObjectExtraData EppsteinPathFinderTest::staticMetaObjectExtraData = {
     0,  qt_static_metacall 
 };
 
-const QMetaObject YenPathFinderTest::staticMetaObject = {
-    { &QObject::staticMetaObject, qt_meta_stringdata_YenPathFinderTest,
-      qt_meta_data_YenPathFinderTest, &staticMetaObjectExtraData }
+const QMetaObject EppsteinPathFinderTest::staticMetaObject = {
+    { &QObject::staticMetaObject, qt_meta_stringdata_EppsteinPathFinderTest,
+      qt_meta_data_EppsteinPathFinderTest, &staticMetaObjectExtraData }
 };
 
 #ifdef Q_NO_DATA_RELOCATION
-const QMetaObject &YenPathFinderTest::getStaticMetaObject() { return staticMetaObject; }
+const QMetaObject &EppsteinPathFinderTest::getStaticMetaObject() { return staticMetaObject; }
 #endif //Q_NO_DATA_RELOCATION
 
-const QMetaObject *YenPathFinderTest::metaObject() const
+const QMetaObject *EppsteinPathFinderTest::metaObject() const
 {
     return QObject::d_ptr->metaObject ? QObject::d_ptr->metaObject : &staticMetaObject;
 }
 
-void *YenPathFinderTest::qt_metacast(const char *_clname)
+void *EppsteinPathFinderTest::qt_metacast(const char *_clname)
 {
     if (!_clname) return 0;
-    if (!strcmp(_clname, qt_meta_stringdata_YenPathFinderTest))
-        return static_cast<void*>(const_cast< YenPathFinderTest*>(this));
+    if (!strcmp(_clname, qt_meta_stringdata_EppsteinPathFinderTest))
+        return static_cast<void*>(const_cast< EppsteinPathFinderTest*>(this));
     return QObject::qt_metacast(_clname);
 }
 
-int YenPathFinderTest::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
+int EppsteinPathFinderTest::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
 {
     _id = QObject::qt_metacall(_c, _id, _a);
     if (_id < 0)

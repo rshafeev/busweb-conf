@@ -143,11 +143,23 @@ private Q_SLOTS:
     void findDijkstraShortestPathEdgTest(){
         // prepare setup info
         int source = 0;
-        int target = 5;
+        int target = 11;
+        int maxPathsCount = 13;
 
         std::shared_ptr<Graph> graph = std::shared_ptr<Graph>(new Graph(epsGraphData1));
-        vertex_descriptor _source = graph->getVertex(source);
-        vertex_descriptor _target = graph->getVertex(target);
+        // find shortest paths
+        DijkstraPathFinder finder(graph);
+        PathsContainer paths = finder.findShPaths(source,target,maxPathsCount);
+
+        // check result
+        QVERIFY(paths.getPathsCount()>=1);
+
+        for(int i=0;i < paths.getPathsCount(); i++){
+            BoostPath* path = ((BoostPath*) paths.getPath(i).get());
+            QCOMPARE(path->getVertexes().at(0),target);
+            QCOMPARE(path->getVertexes().at(path->getVertexesCount()-1), source);
+            std::cout << path->toString();
+        }
 
     }
 

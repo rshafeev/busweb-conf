@@ -1,11 +1,12 @@
 
-#ifndef YENPATHFINDERTEST_H
-#define YENPATHFINDERTEST_H
+#ifndef EPPSTEINPATHFINDERTEST_H
+#define EPPSTEINPATHFINDERTEST_H
 
 #include <QtTest>
-#include "yen/YenPathFinder.h"
+#include "epps/EppsteinPathFinder.h"
 #include  "helpers/TestGraphDataLoader.h"
-class YenPathFinderTest : public QObject
+
+class EppsteinPathFinderTest : public QObject
 {
     Q_OBJECT
 
@@ -20,7 +21,7 @@ private Q_SLOTS:
     }
 
     /**
-     * Проверка успешности поиска кратчайших путей на тестовом графе. Т
+     * Проверка успешности поиска кратчайших путей на тестовом графе.
      * Тест должен завершиться успешно
      * без выброса исключений
      * @brief findPathsTest
@@ -33,7 +34,7 @@ private Q_SLOTS:
 
         cout << "findShortestPathsTest():\n";
         // find shortest paths
-        YenPathFinder *finder = new YenPathFinder(graphData);
+        EppsteinPathFinder *finder = new EppsteinPathFinder(graphData);
         paths_t paths = finder->findShortestPaths(source,target,maxPathsCount);
 
         // clean memory
@@ -48,6 +49,7 @@ private Q_SLOTS:
 
 };
 
-#include "moc/YenPathFinderTest.moc"
+#include "moc/EppsteinPathFinderTest.moc"
 
 #endif
+
