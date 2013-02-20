@@ -101,10 +101,11 @@ CREATE TYPE bus.path_t AS
    
    relation_index_a       integer,
    relation_index_b       integer,
-   station_name_a           text,
-   station_name_b           text,
+   station_name_a         text,
+   station_name_b         text,
    move_time              interval,
    wait_time              interval,
+   frequency              interval,
    cost                   double precision,
    distance               double precision
 );	

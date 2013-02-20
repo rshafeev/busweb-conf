@@ -1,4 +1,5 @@
 ﻿
+
 --==========================================================================================================================  
 CREATE OR REPLACE FUNCTION bus._path_weight(m_cost_time interval, 
                                             m_cost_money double precision,
@@ -8,10 +9,13 @@ $BODY$
 DECLARE
   m_move_time interval;
 BEGIN
+
+
   case when m_alg_strategy = bus.alg_strategy('c_time') then return bus.interval_to_double(m_cost_time);
        when m_alg_strategy = bus.alg_strategy('c_cost') then return bus.interval_to_double(m_cost_time)/400.0 + m_cost_money;
        else return bus.interval_to_double(m_cost_time)/150.0 + m_cost_money;
   end case;       
+
 END;
 $BODY$
   LANGUAGE plpgsql IMMUTABLE;	
@@ -33,6 +37,7 @@ BEGIN
 END;
 $BODY$
   LANGUAGE plpgsql IMMUTABLE;	
+
     
 --==========================================================================================================================  
 
@@ -113,15 +118,16 @@ $BODY$
 --==========================================================================================================================  
 
   CREATE OR REPLACE FUNCTION bus.find_shortest_paths(	_city_id  	bigint,
-							_p1 		geography,
-							_p2 		geography,
-							m_day_id 	bus.day_enum,
-							m_time_start  	time,
-					        _max_distance 	double precision,
-					        _route_types 	text[],
-					        _discounts      double precision[],
-					        m_alg_strategy   bus.alg_strategy,
-					        _lang_id        bus.lang_enum)
+						_p1 		geography,
+						_p2 		geography,
+						m_day_id 	bus.day_enum,
+						m_time_start  	time,
+					    _max_distance 	double precision,
+					    _route_types 	text[],
+                        _has_transitions bool,
+					    _discounts      double precision[],
+					    m_alg_strategy   bus.alg_strategy,
+					    _lang_id        bus.lang_enum)
 RETURNS SETOF bus.path_t AS
 $BODY$
 DECLARE
@@ -253,6 +259,7 @@ BEGIN
 	    distance        double precision,
 	    weight     double precision
 	) ON COMMIT DROP;
+
 	
 	-- Найдем маршруты без пересадок
     m_path_id := 1;
@@ -293,10 +300,13 @@ BEGIN
 				values(m_path_id, 3, m_rec.walk_time_b, m_rec.distance_b,bus._path_weight(m_rec.walk_time_b,0.0,m_alg_strategy));
             
        m_path_id := m_path_id + 1;
+
+       
      --  raise notice '%', m_rec;
     end loop;
 
-				
+if _has_transitions = true then
+
 					
   -- Добавим level = 2
   insert into droutes_one(droute_a_id,droute_b_id,rindex_start_a,rindex_finish_a,
@@ -732,7 +742,8 @@ BEGIN
          
       --  raise notice '%', m_rec;
   end loop; 	
-   
+
+end if;  --_has_transitions = true 
   -- Выведем рузультат
 /* 	    path_id         integer,
 	    ind             integer,
@@ -759,6 +770,7 @@ BEGIN
 		stb_names.value             		as station_name_b,
 		paths.move_time                 	as move_time,
 		paths.wait_time                 	as wait_time,
+		paths.wait_time                     as frequency,
 		paths.cost                      	as cost,
 		paths.distance                  	as distance
         FROM  paths
