@@ -184,7 +184,6 @@ BEGIN
     ) as discounts
     ON discounts.id =  route_types.id;
 
-
  -- Хранит части маршрутов без пересадок
   CREATE TEMPORARY  TABLE droutes_zero(
 		id 				bigint,
@@ -196,7 +195,7 @@ BEGIN
 		level           integer
   )ON COMMIT DROP;
 	
-  -- Хранит части маршрутов без пересадок	
+  -- Хранит части маршрутов	
   CREATE TEMPORARY  TABLE droutes_one(
 		id 				bigint,
 		droute_a_id     bigint,
@@ -1118,30 +1117,36 @@ BEGIN
      	flag := false;
      	ind := 0;
 		loop
-		    transition := bus.find_route_transiton(droute_id,_id,ind);
-		    if transition is null then
+		   for transition in select * from bus.find_route_transitons(droute_id,_id,ind)
+		   loop
+				if transition is null then
+				    flag := true;
+					exit;
+				end if;
+				insert into bus.route_transitions 
+					(droute_a_id,
+					droute_b_id,
+					from_index_a_id,
+					to_index_b_id,
+					transition_distance,
+					transition_time,
+					transition_discount,
+					set_manual
+					) 
+				values (
+					droute_id,
+					_id,
+					transition.index_a,
+					transition.index_b,
+					transition.distance,
+					bus.get_walking_move_time(transition.distance),
+					1.0,
+					false
+					);
+			end loop;
+			if flag = false then
 				exit;
 			end if;
-			insert into bus.route_transitions 
-				(droute_a_id,
-				 droute_b_id,
-				 from_index_a_id,
-				 to_index_b_id,
-				 transition_distance,
-				 transition_time,
-				 transition_discount,
-				 set_manual
-				) 
-			values (
-				 droute_id,
-				 _id,
-				 transition.index_a,
-				 transition.index_b,
-				 transition.distance,
-				 bus.get_walking_move_time(transition.distance),
-				 1.0,
-				 false
-			);
 			ind := transition.index_a + 1;
 			-- raise notice 'droute_a : %, droute_b: %, transition: %',droute_id,_id, transition;
      	end loop;
@@ -1200,17 +1205,16 @@ LANGUAGE plpgsql IMMUTABLE;
 --===============================================================================================================/*
 /*  Функция  ищет первый возможый переход с маршрута _from_droute_id на 
   маршрут _to_droute_id, начиная с дуги первого маршрута, индекс которой равен _start_index.
-  
   @_from_droute_id Id маршрута, для которого ищем переход на маршрут _to_droute_id
   @_to_droute_id Id машршрута, на который возможен переход с маршрута _from_droute_id
   @_start_index Индекс дуги маршута droute1_id, с которой начинаем поиск перехода на droute2_id
   @return Возвращает первый найденный переход
 */
-CREATE OR REPLACE FUNCTION bus.find_route_transiton( _from_droute_id  bigint, 
+CREATE OR REPLACE FUNCTION bus.find_route_transitons( _from_droute_id  bigint, 
                                                     _to_droute_id    bigint,
                                                     _start_index     integer
                                                     )
-RETURNS bus.route_transition AS
+RETURNS SETOF bus.route_transition AS
 $BODY$
 DECLARE
  _r bus.route_transition;
@@ -1221,7 +1225,7 @@ BEGIN
 SELECT bus.direct_routes.route_id INTO r1_id FROM bus.direct_routes where id = _from_droute_id LIMIT 1;
 SELECT bus.direct_routes.route_id INTO r2_id FROM bus.direct_routes where id = _to_droute_id LIMIT 1;
 if r1_id = r2_id then
-    return null;
+    return;
 end if;  
 -- Найдем дуги(переходы) между пересек. маршрутами
  FOR _r IN 
@@ -1245,18 +1249,17 @@ end if;
     (select  bus.route_relations.id as id,
              position_index,
              location, 
-             station_a_id
+             station_b_id
         from bus.route_relations
-	    join bus.stations ON bus.stations.id = bus.route_relations.station_a_id
+	    join bus.stations ON bus.stations.id = bus.route_relations.station_b_id
         where direct_route_id = _to_droute_id
 	    order by position_index
         ) as table2
    WHERE  ST_DWithin(table1.location, table2.location,bus._MAX_TRANSITION_DISTANCE())
          AND    bus._is_has_transition(table1.id,table2.id, bus._MAX_TRANSITION_DISTANCE()/2.0)
-   LIMIT 1            
  LOOP
+    return next _r;
  END LOOP;
- return _r;
 END;
 $BODY$
 LANGUAGE plpgsql IMMUTABLE;

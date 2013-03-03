@@ -1,7 +1,7 @@
  BEGIN;
- select  * from  bus.find_shortest_paths(bus.get_city_id(bus.lang_enum('c_ru'),'Киев'),
-				 st_geographyfromtext('POINT(50.462148544138415 30.482511520385742)'),
-				 st_geographyfromtext('POINT(50.42973665246389 30.54147720336914)'),
+ select  * from  bus.find_shortest_paths(bus.get_city_id(bus.lang_enum('c_ru'),'Харьков'),
+				 st_geographyfromtext('POINT(50.03608393128972 36.22020721435547)'),
+				 st_geographyfromtext('POINT(50.025828752356176 36.33710861206055)'),
 				 bus.day_enum('c_Monday'),
 				 time  '10:00:00',
 				 1100,
@@ -15,6 +15,8 @@
 				       1],
 				 bus.alg_strategy('c_time'),
 				 bus.lang_enum('c_ru')) ORDER BY path_id,index; 
+
+
  --select  * from paths;
  --select * from droutes_zero where level = 4;
  
