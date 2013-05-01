@@ -95,7 +95,7 @@ CREATE TYPE bus.path_t AS
 (
    path_id                integer,
    index                  integer,
-   direct_route_id        bigint,
+   rway_id                bigint,
    route_type             bus.route_type_enum,
    route_name             text,
    
@@ -363,16 +363,16 @@ WITH (
 
 --================
 
-CREATE TABLE bus.direct_routes
+CREATE TABLE bus.route_ways
 (
   id           bigserial NOT NULL,
   route_id     bigint    NOT NULL,
   direct       BIT(1)    NOT NULL,
 
- CONSTRAINT direct_routes_pk PRIMARY KEY (id),
- CONSTRAINT direct_routes_unique UNIQUE(route_id, direct),
+ CONSTRAINT rways_pk PRIMARY KEY (id),
+ CONSTRAINT rways_unique UNIQUE(route_id, direct),
  
- CONSTRAINT direct_route_routeid_fk FOREIGN KEY (route_id)
+ CONSTRAINT rways_routeid_fk FOREIGN KEY (route_id)
       REFERENCES bus.routes (id) MATCH SIMPLE
       ON UPDATE CASCADE ON DELETE CASCADE
   
@@ -383,7 +383,7 @@ CREATE TABLE bus.direct_routes
 CREATE TABLE bus.route_relations
 (
   id   				serial 		     		NOT NULL,
-  direct_route_id 	bigint    		 		NOT NULL,
+  rway_id 	        bigint    		 		NOT NULL,
   station_A_id      bigint    		 		,
   station_B_id      bigint    		 		,
   position_index    bigint    		 		NOT NULL,
@@ -392,8 +392,8 @@ CREATE TABLE bus.route_relations
   geom              GEOGRAPHY(LINESTRING,4326)	,
   CONSTRAINT route_relations_pk PRIMARY KEY (id),
 
-  CONSTRAINT route_relations_directroute_id_fk FOREIGN KEY (direct_route_id)
-      REFERENCES bus.direct_routes (id) MATCH SIMPLE
+  CONSTRAINT route_relations_rway_id_fk FOREIGN KEY (rway_id)
+      REFERENCES bus.route_ways (id) MATCH SIMPLE
       ON UPDATE CASCADE ON DELETE CASCADE,
         
   CONSTRAINT route_relations_station_A_id_fk FOREIGN KEY (station_A_id)
