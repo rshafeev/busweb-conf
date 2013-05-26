@@ -21,6 +21,7 @@ Thumbs.db
 *.cache
 *.ilk
 *.log
+*.conf
 [Bb]in
 [Dd]ebug*/
 release*/
