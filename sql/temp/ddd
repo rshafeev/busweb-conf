@@ -1,1 +1,0 @@
-﻿select value,(ST_AsText(location)) from bus.stations JOIN bus.string_values ON bus.stations.name_key = bus.string_values.key_id where lang_id='c_en';
